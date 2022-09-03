@@ -1,0 +1,20 @@
+[package]
+name = "rust_particles"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = ["native"]
+native = ["glam/std"]
+
+[dependencies]
+winit = "0.27.2"
+specs = "0.16.1"
+wgpu = "0.13"
+glam = { version = "0.21", default-features = false, features = ["bytemuck"] }
+bytemuck = { version = "1.12", features = [ "derive" ] }
+rand = "0.8.5"
+pollster = "0.2"
+env_logger = "0.9"
