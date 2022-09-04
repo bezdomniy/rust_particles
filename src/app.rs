@@ -1,5 +1,8 @@
 use rand::{thread_rng, Rng};
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    time::{Duration, Instant},
+};
 use wgpu::{
     util::DeviceExt, Adapter, Buffer, Device, Instance, Queue, RenderPipeline, Surface,
     SurfaceConfiguration,
@@ -10,8 +13,9 @@ use winit::{
     window::Window,
 };
 
+const FRAMERATE: u32 = 30;
 const NUM_PARTICLES: u32 = 1024;
-const PARTICLE_SIZE: f32 = 5f32;
+const PARTICLE_SIZE: f32 = 3f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 
 pub struct App {
@@ -19,13 +23,15 @@ pub struct App {
     instance: Instance,
     surface: Surface,
     window: Window,
+    particle_data: Vec<Particle>,
     adapter: Option<Adapter>,
     device: Option<Device>,
     queue: Option<Queue>,
     render_pipeline: Option<RenderPipeline>,
     config: Option<SurfaceConfiguration>,
     particle_buffer: Option<Buffer>,
-    vertices_buffer: Option<Buffer>,
+    vertex_buffer: Option<Buffer>,
+    index_buffer: Option<Buffer>,
 }
 
 #[repr(C)]
@@ -48,13 +54,15 @@ impl App {
             instance,
             surface,
             window,
+            particle_data: Vec::with_capacity(NUM_PARTICLES as usize),
             adapter: None,
             config: None,
             device: None,
             queue: None,
             render_pipeline: None,
             particle_buffer: None,
-            vertices_buffer: None,
+            vertex_buffer: None,
+            index_buffer: None,
         }
     }
 
@@ -102,32 +110,41 @@ impl App {
 
         // buffer for the three 2d triangle vertices of each instance
         let mut vertex_buffer_data = [
-            0.001f32, 0.001f32, -0.001f32, -0.001f32, 0.001f32, -0.001f32, 0.001f32, 0.001f32,
-            -0.001f32, -0.001f32, -0.001f32, 0.001f32,
+            0.001f32, 0.001f32, -0.001f32, -0.001f32, 0.001f32, -0.001f32, -0.001f32, 0.001f32,
         ];
 
         for v in vertex_buffer_data.iter_mut() {
             *v *= PARTICLE_SIZE
         }
 
-        let vertices_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let index_buffer_data = [0u16, 1u16, 2u16, 0u16, 1u16, 3u16];
+
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::bytes_of(&vertex_buffer_data),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let mut initial_particle_data = vec![Particle::default(); NUM_PARTICLES as usize];
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::bytes_of(&index_buffer_data),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
+        // let mut initial_particle_data = vec![Particle::default(); NUM_PARTICLES as usize];
         let unif = || thread_rng().gen_range(-1f32..=1f32); // Generate a num (-1, 1)
                                                             // let disc = || thread_rng().gen_range(0u32..4u32);
-        for particle_instance_chunk in initial_particle_data.iter_mut() {
-            particle_instance_chunk.posx = unif(); // posx
-            particle_instance_chunk.posy = unif(); // posy
-            particle_instance_chunk.cls = thread_rng().gen_range(0u32..4u32); // type
+        for _ in 0..NUM_PARTICLES {
+            self.particle_data.push(Particle {
+                posx: unif(),
+                posy: unif(),
+                cls: thread_rng().gen_range(0u32..4u32),
+            })
         }
 
         let particle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Particle Buffer"),
-            contents: bytemuck::cast_slice(&initial_particle_data),
+            contents: bytemuck::cast_slice(&self.particle_data),
             usage: wgpu::BufferUsages::VERTEX
                 // | wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST,
@@ -183,16 +200,31 @@ impl App {
         self.adapter = Some(adapter);
         self.render_pipeline = Some(render_pipeline);
         self.particle_buffer = Some(particle_buffer);
-        self.vertices_buffer = Some(vertices_buffer);
+        self.vertex_buffer = Some(vertex_buffer);
+        self.index_buffer = Some(index_buffer);
+    }
+
+    fn update(particle_data: &mut Vec<Particle>, buffer: &mut Buffer, queue: &mut Queue) {
+        let unif = || thread_rng().gen_range(-1f32..=1f32); // Generate a num (-1, 1)
+                                                            // let disc = || thread_rng().gen_range(0u32..4u32);
+        for particle_instance_chunk in particle_data.iter_mut() {
+            particle_instance_chunk.posx = unif(); // posx
+            particle_instance_chunk.posy = unif(); // posy
+            particle_instance_chunk.cls = thread_rng().gen_range(0u32..4u32); // type
+        }
+
+        queue.write_buffer(buffer, 0, bytemuck::cast_slice(&particle_data));
     }
 
     pub async fn run(mut self) {
         let mut config = self.config.take().unwrap();
         let device = self.device.take();
-        let queue = self.queue.take();
+        let mut queue = self.queue.take();
         let render_pipeline = self.render_pipeline.take();
-        let particle_buffer = self.particle_buffer.take();
-        let vertices_buffer = self.vertices_buffer.take();
+        let mut particle_buffer = self.particle_buffer.take();
+        let vertices_buffer = self.vertex_buffer.take();
+
+        let mut last_update_inst = Instant::now();
 
         self.event_loop.run(move |event, _, control_flow| {
             // Have the closure take ownership of the resources.
@@ -214,7 +246,30 @@ impl App {
                     // On macos the window needs to be redrawn manually after resizing
                     self.window.request_redraw();
                 }
-                Event::RedrawRequested(_) => {
+                Event::RedrawEventsCleared => {
+                    let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE as f64);
+                    let time_since_last_frame = last_update_inst.elapsed();
+
+                    if time_since_last_frame >= target_frametime {
+                        last_update_inst = Instant::now();
+                        log::info!(
+                            "Framerate: {}",
+                            1000u128 / time_since_last_frame.as_millis()
+                        );
+
+                        Self::update(
+                            &mut self.particle_data,
+                            particle_buffer.as_mut().unwrap(),
+                            queue.as_mut().unwrap(),
+                        );
+                    } else {
+                        // exit(0);
+                        *control_flow = ControlFlow::WaitUntil(
+                            Instant::now() + target_frametime - time_since_last_frame,
+                        );
+                    }
+                }
+                Event::MainEventsCleared => {
                     let frame = self
                         .surface
                         .get_current_texture()
@@ -240,9 +295,14 @@ impl App {
                             depth_stencil_attachment: None,
                         });
                         rpass.set_pipeline(&render_pipeline.as_ref().unwrap());
+                        rpass.set_index_buffer(
+                            self.index_buffer.as_ref().unwrap().slice(..),
+                            wgpu::IndexFormat::Uint16,
+                        );
                         rpass.set_vertex_buffer(0, particle_buffer.as_ref().unwrap().slice(..));
                         rpass.set_vertex_buffer(1, vertices_buffer.as_ref().unwrap().slice(..));
-                        rpass.draw(0..6, 0..NUM_PARTICLES);
+                        // rpass.draw(0..6, 0..NUM_PARTICLES);
+                        rpass.draw_indexed(0..6 as u32, 0, 0..NUM_PARTICLES);
                     }
 
                     queue.as_ref().unwrap().submit(Some(encoder.finish()));

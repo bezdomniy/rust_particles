@@ -18,7 +18,7 @@ fn main_vs(
 @fragment
 fn main_fs(vertex: VertexOutput) -> @location(0) vec4<f32> {
     if (vertex.cls == 3u) {
-        return vec4<f32>(1f,1f,0f,1f);
+        return vec4<f32>(1f,1f,1f,1f);
     }
     var color = vec4<f32>(0f,0f,0f,1f);
     color[vertex.cls] = 1f;
