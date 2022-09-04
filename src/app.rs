@@ -28,6 +28,14 @@ pub struct App {
     vertices_buffer: Option<Buffer>,
 }
 
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Particle {
+    posx: f32,
+    posy: f32,
+    cls: u32,
+}
+
 impl App {
     pub fn new() -> Self {
         let event_loop = EventLoop::new();
@@ -108,12 +116,13 @@ impl App {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        let mut initial_particle_data = vec![0f32; (2 * NUM_PARTICLES) as usize];
+        let mut initial_particle_data = vec![Particle::default(); NUM_PARTICLES as usize];
         let unif = || thread_rng().gen_range(-1f32..=1f32); // Generate a num (-1, 1)
                                                             // let disc = || thread_rng().gen_range(0u32..4u32);
-        for particle_instance_chunk in initial_particle_data.chunks_mut(2) {
-            particle_instance_chunk[0] = unif(); // posx
-            particle_instance_chunk[1] = unif(); // posy
+        for particle_instance_chunk in initial_particle_data.iter_mut() {
+            particle_instance_chunk.posx = unif(); // posx
+            particle_instance_chunk.posy = unif(); // posy
+            particle_instance_chunk.cls = thread_rng().gen_range(0u32..4u32); // type
         }
 
         let particle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -136,14 +145,14 @@ impl App {
                 entry_point: "main_vs",
                 buffers: &[
                     wgpu::VertexBufferLayout {
-                        array_stride: 2 * 4,
+                        array_stride: 3 * 4,
                         step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &wgpu::vertex_attr_array![0 => Float32x2],
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Uint32],
                     },
                     wgpu::VertexBufferLayout {
                         array_stride: 2 * 4,
                         step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &wgpu::vertex_attr_array![1 => Float32x2],
+                        attributes: &wgpu::vertex_attr_array![2 => Float32x2],
                     },
                 ],
             },
