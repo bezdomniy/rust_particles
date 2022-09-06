@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use rand::{rngs::ThreadRng, thread_rng, Rng};
 use std::{
     borrow::Cow,
@@ -13,8 +14,8 @@ use winit::{
     window::Window,
 };
 
-const FRAMERATE: u32 = 30;
-const NUM_PARTICLES: usize = 256;
+const FRAMERATE: u32 = 15;
+const NUM_PARTICLES: usize = 16;
 
 const P_COLOUR: [f32; 4] = [0.5, 0.0, 0.5, 0.0];
 
@@ -52,103 +53,100 @@ struct Particle {
 }
 
 fn init_particles(particle_data: &mut Vec<Particle>, particle_offsets: &[usize]) {
-    for _ in 0..particle_offsets[0] {
-        particle_data.push(Particle {
-            posx: thread_rng().gen_range(-1f32..=1f32),
-            posy: thread_rng().gen_range(-1f32..=1f32),
-            velx: thread_rng().gen_range(-1f32..=1f32),
-            vely: thread_rng().gen_range(-1f32..=1f32),
-            cls: 0,
-        })
-    }
-    for _ in particle_offsets[0]..particle_offsets[1] {
-        particle_data.push(Particle {
-            posx: thread_rng().gen_range(-1f32..=1f32),
-            posy: thread_rng().gen_range(-1f32..=1f32),
-            velx: thread_rng().gen_range(-1f32..=1f32),
-            vely: thread_rng().gen_range(-1f32..=1f32),
-            cls: 1,
-        })
-    }
-    for _ in particle_offsets[1]..particle_offsets[2] {
-        particle_data.push(Particle {
-            posx: thread_rng().gen_range(-1f32..=1f32),
-            posy: thread_rng().gen_range(-1f32..=1f32),
-            velx: thread_rng().gen_range(-1f32..=1f32),
-            vely: thread_rng().gen_range(-1f32..=1f32),
-            cls: 2,
-        })
-    }
-    for _ in particle_offsets[2]..NUM_PARTICLES {
-        particle_data.push(Particle {
-            posx: thread_rng().gen_range(-1f32..=1f32),
-            posy: thread_rng().gen_range(-1f32..=1f32),
-            velx: thread_rng().gen_range(-1f32..=1f32),
-            vely: thread_rng().gen_range(-1f32..=1f32),
-            cls: 3,
-        })
+    for (i, j) in (-1..4).into_iter().tuple_windows() {
+        let start = if i < 0 {
+            0
+        } else {
+            particle_offsets[i as usize]
+        };
+        let end = if j < 3 {
+            particle_offsets[j as usize]
+        } else {
+            NUM_PARTICLES
+        };
+
+        for _ in start..end {
+            particle_data.push(Particle {
+                posx: thread_rng().gen_range(-1f32..=1f32),
+                posy: thread_rng().gen_range(-1f32..=1f32),
+                velx: 0f32, //thread_rng().gen_range(-0.01f32..=0.01f32),
+                vely: 0f32, //thread_rng().gen_range(-0.01f32..=0.01f32),
+                cls: j as u32,
+            })
+        }
     }
 }
 
-// // Interaction between 2 particle groups
-// fn interaction(
-//     particle_data: &mut [Particle],
-//     particle_offsets: &[usize],
-//     group1_idx: usize,
-//     group2_idx: usize,
-//     g: f32,
-//     radius: f32,
-// ) {
-//     let group1_start = if group1_idx == 0 {
-//         0
-//     } else {
-//         particle_offsets[group1_idx - 1]
-//     };
+// Interaction between 2 particle groups
+fn interaction(
+    particle_data: &mut [Particle],
+    particle_offsets: &[usize],
+    group1_idx: usize,
+    group2_idx: usize,
+    g: f32,
+    radius: f32,
+) {
+    let group1_start = if group1_idx == 0 {
+        0
+    } else {
+        particle_offsets[group1_idx - 1]
+    };
 
-//     let group2_start = if group2_idx == 0 {
-//         0
-//     } else {
-//         particle_offsets[group2_idx - 1]
-//     };
+    let group2_start = if group2_idx == 0 {
+        0
+    } else {
+        particle_offsets[group2_idx - 1]
+    };
 
-//     let group1_slice = &mut particle_data[group1_start..particle_offsets[group1_idx] as usize];
-//     let group2_slice = &particle_data[group2_start..particle_offsets[group2_idx] as usize];
+    let group1_end = if group1_idx == 3 {
+        NUM_PARTICLES
+    } else {
+        particle_offsets[group1_idx]
+    };
 
-//     let g = g / -100f32;
+    let group2_end = if group2_idx == 3 {
+        NUM_PARTICLES
+    } else {
+        particle_offsets[group2_idx]
+    };
+    // let group1_slice = &particle_data[group1_start..particle_offsets[group1_idx] as usize];
+    // let group2_slice = &particle_data[group2_start..particle_offsets[group2_idx] as usize];
 
-//     // omp_set_num_threads(4);
-//     // #pragma omp parallel for
-//     for p1 in group1_slice.iter_mut() {
-//         let mut fx = 0f32;
-//         let mut fy = 0f32;
-//         for p2 in group2_slice.iter() {
-//             let dx = p1.posx - p2.posx;
-//             let dy = p1.posy - p2.posy;
-//             let r = (dx * dx + dy * dy).sqrt();
-//             if r < radius && r > 0f32 {
-//                 fx += dx / r;
-//                 fy += dy / r;
-//             }
-//         }
+    let g = g / -100f32;
 
-//         p1.velx = (p1.velx + (fx * g)) * 0.5;
-//         p1.vely = (p1.vely + (fy * g)) * 0.5;
-//         p1.posx += p1.velx;
-//         p1.posy += p1.vely;
+    // omp_set_num_threads(4);
+    // #pragma omp parallel for
+    for i in group1_start..group1_end {
+        let p1 = particle_data[i];
+        let mut fx = 0f32;
+        let mut fy = 0f32;
+        for j in group2_start..group2_end {
+            let p2 = particle_data.get(j).unwrap();
+            let dx = p1.posx - p2.posx;
+            let dy = p1.posy - p2.posy;
+            let r = (dx * dx + dy * dy).sqrt();
+            if r < radius && r > 0f32 {
+                fx += dx / r;
+                fy += dy / r;
+            }
+        }
 
-//         // if (boundsToggle) {
-//         //     //not good enough! Need fixing
-//         //     if (p1.posx >= (1920 - 10) as f32) || (p1.posx <= (550 + 10) as f32) {
-//         //         p1.velx *= -1f32;
-//         //     }
-//         //     if (p1.posy >= (1024 - 10) as f32) || (p1.posy <= (0 + 10) as f32) {
-//         //         p1.vely *= -1f32;
-//         //     }
-//         // }
+        particle_data[i].velx = p1.velx + (fx * g);
+        particle_data[i].vely = p1.vely + (fy * g);
+        particle_data[i].posx += p1.velx;
+        particle_data[i].posy += p1.vely;
 
-//         // (*Group1)[i] = p1;
-//     }
-// }
+        // if (boundsToggle) {
+        //     //not good enough! Need fixing
+        //     if (p1.posx >= (1920 - 10) as f32) || (p1.posx <= (550 + 10) as f32) {
+        //         p1.velx *= -1f32;
+        //     }
+        //     if (p1.posy >= (1024 - 10) as f32) || (p1.posy <= (0 + 10) as f32) {
+        //         p1.vely *= -1f32;
+        //     }
+        // }
+    }
+}
 
 impl App {
     pub fn new() -> Self {
@@ -324,7 +322,7 @@ impl App {
         // let blue_slice = &mut particle_data[particle_offsets[1]..particle_offsets[2] as usize];
         // let white_slice = &mut particle_data[particle_offsets[2]..particle_offsets[3] as usize];
 
-        let powerSliderGG = 10f32;
+        let powerSliderGG = 0.001f32;
         let powerSliderGR = 10f32;
         let powerSliderGW = 10f32;
         let powerSliderGB = 10f32;
@@ -344,7 +342,7 @@ impl App {
         let powerSliderBW = 10f32;
         let powerSliderBB = 10f32;
 
-        let vSliderGG = 0f32;
+        let vSliderGG = 100000f32;
         let vSliderGR = 0f32;
         let vSliderGW = 0f32;
         let vSliderGB = 0f32;
@@ -366,14 +364,14 @@ impl App {
 
         for i in 0..4 {
             for j in 0..4 {
-                // interaction(
-                //     particle_data.as_mut_slice(),
-                //     particle_offsets,
-                //     i,
-                //     j,
-                //     powerSliderGG,
-                //     vSliderGG,
-                // );
+                interaction(
+                    particle_data.as_mut_slice(),
+                    particle_offsets,
+                    i,
+                    j,
+                    powerSliderGG,
+                    vSliderGG,
+                );
             }
         }
 
