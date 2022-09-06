@@ -1,4 +1,4 @@
-use rand::{thread_rng, Rng};
+use rand::{rngs::ThreadRng, thread_rng, Rng};
 use std::{
     borrow::Cow,
     time::{Duration, Instant},
@@ -14,9 +14,15 @@ use winit::{
 };
 
 const FRAMERATE: u32 = 30;
-const NUM_PARTICLES: u32 = 1024;
+const NUM_PARTICLES: usize = 256;
+
+const P_COLOUR: [f32; 4] = [0.5, 0.0, 0.5, 0.0];
+
 const PARTICLE_SIZE: f32 = 3f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
+
+// const rng: ThreadRng = thread_rng();
+// const unif = || thread_rng().gen_range(-1f32..=1f32); // Generate a num (-1, 1)
 
 pub struct App {
     event_loop: EventLoop<()>,
@@ -24,6 +30,7 @@ pub struct App {
     surface: Surface,
     window: Window,
     particle_data: Vec<Particle>,
+    particle_offsets: [usize; 3],
     adapter: Option<Adapter>,
     device: Option<Device>,
     queue: Option<Queue>,
@@ -39,8 +46,109 @@ pub struct App {
 struct Particle {
     posx: f32,
     posy: f32,
+    velx: f32,
+    vely: f32,
     cls: u32,
 }
+
+fn init_particles(particle_data: &mut Vec<Particle>, particle_offsets: &[usize]) {
+    for _ in 0..particle_offsets[0] {
+        particle_data.push(Particle {
+            posx: thread_rng().gen_range(-1f32..=1f32),
+            posy: thread_rng().gen_range(-1f32..=1f32),
+            velx: thread_rng().gen_range(-1f32..=1f32),
+            vely: thread_rng().gen_range(-1f32..=1f32),
+            cls: 0,
+        })
+    }
+    for _ in particle_offsets[0]..particle_offsets[1] {
+        particle_data.push(Particle {
+            posx: thread_rng().gen_range(-1f32..=1f32),
+            posy: thread_rng().gen_range(-1f32..=1f32),
+            velx: thread_rng().gen_range(-1f32..=1f32),
+            vely: thread_rng().gen_range(-1f32..=1f32),
+            cls: 1,
+        })
+    }
+    for _ in particle_offsets[1]..particle_offsets[2] {
+        particle_data.push(Particle {
+            posx: thread_rng().gen_range(-1f32..=1f32),
+            posy: thread_rng().gen_range(-1f32..=1f32),
+            velx: thread_rng().gen_range(-1f32..=1f32),
+            vely: thread_rng().gen_range(-1f32..=1f32),
+            cls: 2,
+        })
+    }
+    for _ in particle_offsets[2]..NUM_PARTICLES {
+        particle_data.push(Particle {
+            posx: thread_rng().gen_range(-1f32..=1f32),
+            posy: thread_rng().gen_range(-1f32..=1f32),
+            velx: thread_rng().gen_range(-1f32..=1f32),
+            vely: thread_rng().gen_range(-1f32..=1f32),
+            cls: 3,
+        })
+    }
+}
+
+// // Interaction between 2 particle groups
+// fn interaction(
+//     particle_data: &mut [Particle],
+//     particle_offsets: &[usize],
+//     group1_idx: usize,
+//     group2_idx: usize,
+//     g: f32,
+//     radius: f32,
+// ) {
+//     let group1_start = if group1_idx == 0 {
+//         0
+//     } else {
+//         particle_offsets[group1_idx - 1]
+//     };
+
+//     let group2_start = if group2_idx == 0 {
+//         0
+//     } else {
+//         particle_offsets[group2_idx - 1]
+//     };
+
+//     let group1_slice = &mut particle_data[group1_start..particle_offsets[group1_idx] as usize];
+//     let group2_slice = &particle_data[group2_start..particle_offsets[group2_idx] as usize];
+
+//     let g = g / -100f32;
+
+//     // omp_set_num_threads(4);
+//     // #pragma omp parallel for
+//     for p1 in group1_slice.iter_mut() {
+//         let mut fx = 0f32;
+//         let mut fy = 0f32;
+//         for p2 in group2_slice.iter() {
+//             let dx = p1.posx - p2.posx;
+//             let dy = p1.posy - p2.posy;
+//             let r = (dx * dx + dy * dy).sqrt();
+//             if r < radius && r > 0f32 {
+//                 fx += dx / r;
+//                 fy += dy / r;
+//             }
+//         }
+
+//         p1.velx = (p1.velx + (fx * g)) * 0.5;
+//         p1.vely = (p1.vely + (fy * g)) * 0.5;
+//         p1.posx += p1.velx;
+//         p1.posy += p1.vely;
+
+//         // if (boundsToggle) {
+//         //     //not good enough! Need fixing
+//         //     if (p1.posx >= (1920 - 10) as f32) || (p1.posx <= (550 + 10) as f32) {
+//         //         p1.velx *= -1f32;
+//         //     }
+//         //     if (p1.posy >= (1024 - 10) as f32) || (p1.posy <= (0 + 10) as f32) {
+//         //         p1.vely *= -1f32;
+//         //     }
+//         // }
+
+//         // (*Group1)[i] = p1;
+//     }
+// }
 
 impl App {
     pub fn new() -> Self {
@@ -49,12 +157,22 @@ impl App {
         let instance = wgpu::Instance::new(wgpu::Backends::all());
         let surface = unsafe { instance.create_surface(&window) };
 
+        let particle_offsets = [
+            (NUM_PARTICLES as f32 * P_COLOUR[0]) as usize,
+            (NUM_PARTICLES as f32 * P_COLOUR[0]) as usize
+                + (NUM_PARTICLES as f32 * P_COLOUR[1]) as usize,
+            (NUM_PARTICLES as f32 * P_COLOUR[0]) as usize
+                + (NUM_PARTICLES as f32 * P_COLOUR[1]) as usize
+                + (NUM_PARTICLES as f32 * P_COLOUR[2]) as usize,
+        ];
+
         App {
             event_loop,
             instance,
             surface,
             window,
-            particle_data: Vec::with_capacity(NUM_PARTICLES as usize),
+            particle_offsets,
+            particle_data: Vec::with_capacity(NUM_PARTICLES),
             adapter: None,
             config: None,
             device: None,
@@ -131,16 +249,7 @@ impl App {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        // let mut initial_particle_data = vec![Particle::default(); NUM_PARTICLES as usize];
-        let unif = || thread_rng().gen_range(-1f32..=1f32); // Generate a num (-1, 1)
-                                                            // let disc = || thread_rng().gen_range(0u32..4u32);
-        for _ in 0..NUM_PARTICLES {
-            self.particle_data.push(Particle {
-                posx: unif(),
-                posy: unif(),
-                cls: thread_rng().gen_range(0u32..4u32),
-            })
-        }
+        init_particles(&mut self.particle_data, &self.particle_offsets);
 
         let particle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Particle Buffer"),
@@ -162,9 +271,9 @@ impl App {
                 entry_point: "main_vs",
                 buffers: &[
                     wgpu::VertexBufferLayout {
-                        array_stride: 3 * 4,
+                        array_stride: 5 * 4,
                         step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Uint32],
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Uint32],
                     },
                     wgpu::VertexBufferLayout {
                         array_stride: 2 * 4,
@@ -204,13 +313,68 @@ impl App {
         self.index_buffer = Some(index_buffer);
     }
 
-    fn update(particle_data: &mut Vec<Particle>, buffer: &mut Buffer, queue: &mut Queue) {
-        let unif = || thread_rng().gen_range(-1f32..=1f32); // Generate a num (-1, 1)
-                                                            // let disc = || thread_rng().gen_range(0u32..4u32);
-        for particle_instance_chunk in particle_data.iter_mut() {
-            particle_instance_chunk.posx = unif(); // posx
-            particle_instance_chunk.posy = unif(); // posy
-            particle_instance_chunk.cls = thread_rng().gen_range(0u32..4u32); // type
+    fn update(
+        particle_data: &mut Vec<Particle>,
+        particle_offsets: &[usize],
+        buffer: &mut Buffer,
+        queue: &mut Queue,
+    ) {
+        // let red_slice = &mut particle_data[0..particle_offsets[0] as usize];
+        // let green_slice = &mut particle_data[particle_offsets[0]..particle_offsets[1] as usize];
+        // let blue_slice = &mut particle_data[particle_offsets[1]..particle_offsets[2] as usize];
+        // let white_slice = &mut particle_data[particle_offsets[2]..particle_offsets[3] as usize];
+
+        let powerSliderGG = 10f32;
+        let powerSliderGR = 10f32;
+        let powerSliderGW = 10f32;
+        let powerSliderGB = 10f32;
+
+        let powerSliderRG = 10f32;
+        let powerSliderRR = 10f32;
+        let powerSliderRW = 10f32;
+        let powerSliderRB = 10f32;
+
+        let powerSliderWG = 10f32;
+        let powerSliderWR = 10f32;
+        let powerSliderWW = 10f32;
+        let powerSliderWB = 10f32;
+
+        let powerSliderBG = 10f32;
+        let powerSliderBR = 10f32;
+        let powerSliderBW = 10f32;
+        let powerSliderBB = 10f32;
+
+        let vSliderGG = 0f32;
+        let vSliderGR = 0f32;
+        let vSliderGW = 0f32;
+        let vSliderGB = 0f32;
+
+        let vSliderRG = 0f32;
+        let vSliderRR = 0f32;
+        let vSliderRW = 0f32;
+        let vSliderRB = 0f32;
+
+        let vSliderBG = 0f32;
+        let vSliderBR = 0f32;
+        let vSliderBW = 0f32;
+        let vSliderBB = 0f32;
+
+        let vSliderWG = 0f32;
+        let vSliderWR = 0f32;
+        let vSliderWW = 0f32;
+        let vSliderWB = 0f32;
+
+        for i in 0..4 {
+            for j in 0..4 {
+                // interaction(
+                //     particle_data.as_mut_slice(),
+                //     particle_offsets,
+                //     i,
+                //     j,
+                //     powerSliderGG,
+                //     vSliderGG,
+                // );
+            }
         }
 
         queue.write_buffer(buffer, 0, bytemuck::cast_slice(&particle_data));
@@ -259,6 +423,7 @@ impl App {
 
                         Self::update(
                             &mut self.particle_data,
+                            &self.particle_offsets,
                             particle_buffer.as_mut().unwrap(),
                             queue.as_mut().unwrap(),
                         );
@@ -302,7 +467,7 @@ impl App {
                         rpass.set_vertex_buffer(0, particle_buffer.as_ref().unwrap().slice(..));
                         rpass.set_vertex_buffer(1, vertices_buffer.as_ref().unwrap().slice(..));
                         // rpass.draw(0..6, 0..NUM_PARTICLES);
-                        rpass.draw_indexed(0..6 as u32, 0, 0..NUM_PARTICLES);
+                        rpass.draw_indexed(0..6 as u32, 0, 0..NUM_PARTICLES as u32);
                     }
 
                     queue.as_ref().unwrap().submit(Some(encoder.finish()));

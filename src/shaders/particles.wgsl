@@ -5,13 +5,13 @@ struct VertexOutput {
 
 @vertex
 fn main_vs(
-    @location(0) particle_pos: vec2<f32>,
+    @location(0) particle_data: vec4<f32>,
     @location(1) particle_cls: u32,
     @location(2) position: vec2<f32>,
 ) -> VertexOutput {
     var result: VertexOutput;
     result.cls = particle_cls;
-    result.position = vec4<f32>(position + particle_pos, 0.0, 1.0);
+    result.position = vec4<f32>(position + particle_data.xy, 0.0, 1.0);
     return result;
 }
 
