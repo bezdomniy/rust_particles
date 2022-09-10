@@ -1,5 +1,7 @@
+use glam::Vec2;
 use itertools::Itertools;
 use rand::{rngs::ThreadRng, thread_rng, Rng};
+use rayon::prelude::*;
 use std::{
     borrow::Cow,
     time::{Duration, Instant},
@@ -14,16 +16,15 @@ use winit::{
     window::Window,
 };
 
-const FRAMERATE: u32 = 15;
-const NUM_PARTICLES: usize = 16;
+const FRAMERATE: u32 = 30;
+const NUM_PARTICLES: usize = 10000;
 
-const P_COLOUR: [f32; 4] = [0.5, 0.0, 0.5, 0.0];
+const BOUNDS_TOGGLE: bool = true;
 
-const PARTICLE_SIZE: f32 = 3f32;
+const P_COLOUR: [f32; 4] = [0.5, 0.5, 0.0, 0.0];
+
+const PARTICLE_SIZE: f32 = 1f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
-
-// const rng: ThreadRng = thread_rng();
-// const unif = || thread_rng().gen_range(-1f32..=1f32); // Generate a num (-1, 1)
 
 pub struct App {
     event_loop: EventLoop<()>,
@@ -45,10 +46,8 @@ pub struct App {
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Particle {
-    posx: f32,
-    posy: f32,
-    velx: f32,
-    vely: f32,
+    pos: Vec2,
+    vel: Vec2,
     cls: u32,
 }
 
@@ -67,10 +66,14 @@ fn init_particles(particle_data: &mut Vec<Particle>, particle_offsets: &[usize])
 
         for _ in start..end {
             particle_data.push(Particle {
-                posx: thread_rng().gen_range(-1f32..=1f32),
-                posy: thread_rng().gen_range(-1f32..=1f32),
-                velx: 0f32, //thread_rng().gen_range(-0.01f32..=0.01f32),
-                vely: 0f32, //thread_rng().gen_range(-0.01f32..=0.01f32),
+                pos: Vec2::new(
+                    thread_rng().gen_range(-0.5f32..=0.5f32),
+                    thread_rng().gen_range(-0.5f32..=0.5f32),
+                ),
+                vel: Vec2::new(
+                    thread_rng().gen_range(-0.005f32..=0.005f32),
+                    thread_rng().gen_range(-0.005f32..=0.005f32),
+                ),
                 cls: j as u32,
             })
         }
@@ -79,7 +82,7 @@ fn init_particles(particle_data: &mut Vec<Particle>, particle_offsets: &[usize])
 
 // Interaction between 2 particle groups
 fn interaction(
-    particle_data: &mut [Particle],
+    particle_data: &mut Vec<Particle>,
     particle_offsets: &[usize],
     group1_idx: usize,
     group2_idx: usize,
@@ -112,40 +115,43 @@ fn interaction(
     // let group1_slice = &particle_data[group1_start..particle_offsets[group1_idx] as usize];
     // let group2_slice = &particle_data[group2_start..particle_offsets[group2_idx] as usize];
 
-    let g = g / -100f32;
+    let g = g / -100000f32;
 
-    // omp_set_num_threads(4);
-    // #pragma omp parallel for
-    for i in group1_start..group1_end {
-        let p1 = particle_data[i];
-        let mut fx = 0f32;
-        let mut fy = 0f32;
-        for j in group2_start..group2_end {
-            let p2 = particle_data.get(j).unwrap();
-            let dx = p1.posx - p2.posx;
-            let dy = p1.posy - p2.posy;
-            let r = (dx * dx + dy * dy).sqrt();
-            if r < radius && r > 0f32 {
-                fx += dx / r;
-                fy += dy / r;
+    let new_particle_data: Vec<Particle> = particle_data[group1_start..group1_end]
+        .par_iter()
+        .map(|p1| {
+            let mut f = Vec2::new(0f32, 0f32);
+            particle_data[group2_start..group2_end]
+                .iter()
+                .for_each(|p2| {
+                    let d = p1.pos - p2.pos;
+                    let r = d.length();
+                    if r < radius && r > 0f32 {
+                        f += d / r;
+                    }
+                });
+
+            let mut vel = p1.vel + f * g;
+            let pos = p1.pos + vel;
+            if BOUNDS_TOGGLE {
+                //not good enough! Need fixing
+                if (pos.x >= 1f32) || (pos.x <= -1f32) {
+                    vel.x *= -1f32;
+                }
+                if (pos.y >= 1f32) || (pos.y <= -1f32) {
+                    vel.y *= -1f32;
+                }
             }
-        }
 
-        particle_data[i].velx = p1.velx + (fx * g);
-        particle_data[i].vely = p1.vely + (fy * g);
-        particle_data[i].posx += p1.velx;
-        particle_data[i].posy += p1.vely;
+            Particle {
+                pos,
+                vel,
+                cls: p1.cls,
+            }
+        })
+        .collect();
 
-        // if (boundsToggle) {
-        //     //not good enough! Need fixing
-        //     if (p1.posx >= (1920 - 10) as f32) || (p1.posx <= (550 + 10) as f32) {
-        //         p1.velx *= -1f32;
-        //     }
-        //     if (p1.posy >= (1024 - 10) as f32) || (p1.posy <= (0 + 10) as f32) {
-        //         p1.vely *= -1f32;
-        //     }
-        // }
-    }
+    particle_data.splice(group1_start..group1_end, new_particle_data);
 }
 
 impl App {
@@ -322,7 +328,7 @@ impl App {
         // let blue_slice = &mut particle_data[particle_offsets[1]..particle_offsets[2] as usize];
         // let white_slice = &mut particle_data[particle_offsets[2]..particle_offsets[3] as usize];
 
-        let powerSliderGG = 0.001f32;
+        let powerSliderGG = 0.1f32;
         let powerSliderGR = 10f32;
         let powerSliderGW = 10f32;
         let powerSliderGB = 10f32;
@@ -342,7 +348,7 @@ impl App {
         let powerSliderBW = 10f32;
         let powerSliderBB = 10f32;
 
-        let vSliderGG = 100000f32;
+        let vSliderGG = 1f32;
         let vSliderGR = 0f32;
         let vSliderGW = 0f32;
         let vSliderGB = 0f32;
@@ -365,7 +371,7 @@ impl App {
         for i in 0..4 {
             for j in 0..4 {
                 interaction(
-                    particle_data.as_mut_slice(),
+                    particle_data,
                     particle_offsets,
                     i,
                     j,
@@ -466,6 +472,7 @@ impl App {
                         rpass.set_vertex_buffer(1, vertices_buffer.as_ref().unwrap().slice(..));
                         // rpass.draw(0..6, 0..NUM_PARTICLES);
                         rpass.draw_indexed(0..6 as u32, 0, 0..NUM_PARTICLES as u32);
+                        // device.as_ref().unwrap().poll(wgpu::Maintain::Wait);
                     }
 
                     queue.as_ref().unwrap().submit(Some(encoder.finish()));

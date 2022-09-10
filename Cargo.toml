@@ -13,6 +13,7 @@ native = ["glam/std"]
 winit = "0.27.2"
 specs = "0.16.1"
 wgpu = "0.13"
+rayon = "1.5"
 glam = { version = "0.21", default-features = false, features = ["bytemuck"] }
 bytemuck = { version = "1.12", features = [ "derive" ] }
 rand = "0.8.5"
