@@ -17,7 +17,7 @@ use winit::{
 };
 
 const FRAMERATE: u32 = 30;
-const NUM_PARTICLES: usize = 1024;
+const NUM_PARTICLES: usize = 8192;
 
 const BOUNDS_TOGGLE: bool = true;
 
@@ -81,55 +81,20 @@ fn init_particles(particle_data: &mut Vec<Particle>, particle_offsets: &[usize])
 }
 
 // Interaction between 2 particle groups
-fn interaction(
-    particle_data: &mut Vec<Particle>,
-    particle_offsets: &[usize],
-    group1_idx: usize,
-    group2_idx: usize,
-    g: f32,
-    radius: f32,
-) {
-    let group1_start = if group1_idx == 0 {
-        0
-    } else {
-        particle_offsets[group1_idx - 1]
-    };
+fn interaction(group1: &[Particle], group2: &[Particle], g: f32, radius: f32) -> Vec<Particle> {
+    let g = g / -10000000f32;
 
-    let group2_start = if group2_idx == 0 {
-        0
-    } else {
-        particle_offsets[group2_idx - 1]
-    };
-
-    let group1_end = if group1_idx == 3 {
-        NUM_PARTICLES
-    } else {
-        particle_offsets[group1_idx]
-    };
-
-    let group2_end = if group2_idx == 3 {
-        NUM_PARTICLES
-    } else {
-        particle_offsets[group2_idx]
-    };
-    // let group1_slice = &particle_data[group1_start..particle_offsets[group1_idx] as usize];
-    // let group2_slice = &particle_data[group2_start..particle_offsets[group2_idx] as usize];
-
-    let g = g / -100000f32;
-
-    let new_particle_data: Vec<Particle> = particle_data[group1_start..group1_end]
+    group1
         .par_iter()
         .map(|p1| {
             let mut f = Vec2::new(0f32, 0f32);
-            particle_data[group2_start..group2_end]
-                .iter()
-                .for_each(|p2| {
-                    let d = p1.pos - p2.pos;
-                    let r = d.length();
-                    if r < radius && r > 0f32 {
-                        f += d / r;
-                    }
-                });
+            group2.iter().for_each(|p2| {
+                let d = p1.pos - p2.pos;
+                let r = d.length();
+                if r < radius && r > 0f32 {
+                    f += d / r;
+                }
+            });
 
             let mut vel = p1.vel + f * g;
             let pos = p1.pos + vel;
@@ -149,9 +114,7 @@ fn interaction(
                 cls: p1.cls,
             }
         })
-        .collect();
-
-    particle_data.splice(group1_start..group1_end, new_particle_data);
+        .collect()
 }
 
 impl App {
@@ -328,14 +291,14 @@ impl App {
         // let blue_slice = &mut particle_data[particle_offsets[1]..particle_offsets[2] as usize];
         // let white_slice = &mut particle_data[particle_offsets[2]..particle_offsets[3] as usize];
 
-        let powerSlider = mat4(
+        let power_slider = mat4(
             Vec4::new(10f32, 10f32, 10f32, 10f32),
             Vec4::new(10f32, 10f32, 10f32, 10f32),
             Vec4::new(10f32, 10f32, 10f32, 10f32),
             Vec4::new(10f32, 10f32, 10f32, 10f32),
         );
 
-        let vSlider = mat4(
+        let r_slider = mat4(
             Vec4::new(1f32, 1f32, 1f32, 1f32),
             Vec4::new(1f32, 1f32, 1f32, 1f32),
             Vec4::new(1f32, 1f32, 1f32, 1f32),
@@ -344,14 +307,28 @@ impl App {
 
         for i in 0..4 {
             for j in 0..4 {
-                interaction(
-                    particle_data,
-                    particle_offsets,
-                    i,
-                    j,
-                    powerSlider.col(i)[j],
-                    vSlider.col(i)[j],
+                let group1_start = if i == 0 { 0 } else { particle_offsets[i - 1] };
+
+                let group2_start = if j == 0 { 0 } else { particle_offsets[j - 1] };
+
+                let group1_end = if i == 3 {
+                    NUM_PARTICLES
+                } else {
+                    particle_offsets[i]
+                };
+
+                let group2_end = if j == 3 {
+                    NUM_PARTICLES
+                } else {
+                    particle_offsets[j]
+                };
+                let new_particle_data = interaction(
+                    &particle_data[group1_start..group1_end],
+                    &particle_data[group2_start..group2_end],
+                    power_slider.col(i)[j],
+                    r_slider.col(i)[j],
                 );
+                particle_data.splice(group1_start..group1_end, new_particle_data);
             }
         }
 
