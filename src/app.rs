@@ -1,4 +1,4 @@
-use glam::Vec2;
+use glam::{mat4, Vec2, Vec4};
 use itertools::Itertools;
 use rand::{rngs::ThreadRng, thread_rng, Rng};
 use rayon::prelude::*;
@@ -17,13 +17,13 @@ use winit::{
 };
 
 const FRAMERATE: u32 = 30;
-const NUM_PARTICLES: usize = 10000;
+const NUM_PARTICLES: usize = 1024;
 
 const BOUNDS_TOGGLE: bool = true;
 
 const P_COLOUR: [f32; 4] = [0.5, 0.5, 0.0, 0.0];
 
-const PARTICLE_SIZE: f32 = 1f32;
+const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 
 pub struct App {
@@ -328,45 +328,19 @@ impl App {
         // let blue_slice = &mut particle_data[particle_offsets[1]..particle_offsets[2] as usize];
         // let white_slice = &mut particle_data[particle_offsets[2]..particle_offsets[3] as usize];
 
-        let powerSliderGG = 0.1f32;
-        let powerSliderGR = 10f32;
-        let powerSliderGW = 10f32;
-        let powerSliderGB = 10f32;
+        let powerSlider = mat4(
+            Vec4::new(10f32, 10f32, 10f32, 10f32),
+            Vec4::new(10f32, 10f32, 10f32, 10f32),
+            Vec4::new(10f32, 10f32, 10f32, 10f32),
+            Vec4::new(10f32, 10f32, 10f32, 10f32),
+        );
 
-        let powerSliderRG = 10f32;
-        let powerSliderRR = 10f32;
-        let powerSliderRW = 10f32;
-        let powerSliderRB = 10f32;
-
-        let powerSliderWG = 10f32;
-        let powerSliderWR = 10f32;
-        let powerSliderWW = 10f32;
-        let powerSliderWB = 10f32;
-
-        let powerSliderBG = 10f32;
-        let powerSliderBR = 10f32;
-        let powerSliderBW = 10f32;
-        let powerSliderBB = 10f32;
-
-        let vSliderGG = 1f32;
-        let vSliderGR = 0f32;
-        let vSliderGW = 0f32;
-        let vSliderGB = 0f32;
-
-        let vSliderRG = 0f32;
-        let vSliderRR = 0f32;
-        let vSliderRW = 0f32;
-        let vSliderRB = 0f32;
-
-        let vSliderBG = 0f32;
-        let vSliderBR = 0f32;
-        let vSliderBW = 0f32;
-        let vSliderBB = 0f32;
-
-        let vSliderWG = 0f32;
-        let vSliderWR = 0f32;
-        let vSliderWW = 0f32;
-        let vSliderWB = 0f32;
+        let vSlider = mat4(
+            Vec4::new(1f32, 1f32, 1f32, 1f32),
+            Vec4::new(1f32, 1f32, 1f32, 1f32),
+            Vec4::new(1f32, 1f32, 1f32, 1f32),
+            Vec4::new(1f32, 1f32, 1f32, 1f32),
+        );
 
         for i in 0..4 {
             for j in 0..4 {
@@ -375,8 +349,8 @@ impl App {
                     particle_offsets,
                     i,
                     j,
-                    powerSliderGG,
-                    vSliderGG,
+                    powerSlider.col(i)[j],
+                    vSlider.col(i)[j],
                 );
             }
         }
