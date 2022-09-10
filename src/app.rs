@@ -1,6 +1,6 @@
 use glam::{mat4, Vec2, Vec4};
 use itertools::Itertools;
-use rand::{rngs::ThreadRng, thread_rng, Rng};
+use rand::{thread_rng, Rng};
 use rayon::prelude::*;
 use std::{
     borrow::Cow,
@@ -17,7 +17,7 @@ use winit::{
 };
 
 const FRAMERATE: u32 = 30;
-const NUM_PARTICLES: usize = 8192;
+const NUM_PARTICLES: usize = 12000;
 
 const BOUNDS_TOGGLE: bool = true;
 
@@ -350,9 +350,8 @@ impl App {
             // `event_loop.run` never returns, therefore we must do this to ensure
             // the resources are properly cleaned up.
             // let _ = (&self);
-            let _ = (&self.instance, &self.adapter, &render_pipeline);
+            let _ = (&self.instance, &self.adapter, &device);
 
-            *control_flow = ControlFlow::Wait;
             match event {
                 Event::WindowEvent {
                     event: WindowEvent::Resized(size),
