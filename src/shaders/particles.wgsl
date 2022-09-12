@@ -21,6 +21,18 @@ fn main_fs(vertex: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(1f,1f,1f,1f);
     }
     var color = vec4<f32>(0f,0f,0f,1f);
-    color[vertex.cls] = 1f;
+
+    if (vertex.cls == 0u) {
+        color.x = 1f;
+    }
+    else if (vertex.cls == 1u) {
+        color.y = 1f;
+    }
+    else if (vertex.cls == 2u) {
+        color.z = 1f;
+    }
+    else {
+        color.w = 1f;
+    }
     return color;
 }
