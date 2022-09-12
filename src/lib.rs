@@ -1,6 +1,14 @@
 use glam::{Mat4, UVec4, Vec2, Vec4};
 use rand::{distributions::Uniform, thread_rng, Rng};
+
+// #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
+
+// #[cfg(target_arch = "wasm32")]
+// use wasm_bindgen::{prelude::*, Clamped};
+// #[cfg(target_arch = "wasm32")]
+// pub use wasm_bindgen_rayon::init_thread_pool;
+
 use std::{
     borrow::Cow,
     time::{Duration, Instant},
