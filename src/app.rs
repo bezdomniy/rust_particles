@@ -1,6 +1,5 @@
-use glam::{mat4, Vec2, Vec4};
-use itertools::Itertools;
-use rand::{thread_rng, Rng};
+use glam::{Mat4, UVec4, Vec2, Vec4};
+use rand::{distributions::Uniform, thread_rng, Rng};
 use rayon::prelude::*;
 use std::{
     borrow::Cow,
@@ -17,22 +16,15 @@ use winit::{
 };
 
 const FRAMERATE: u32 = 30;
-const NUM_PARTICLES: usize = 12000;
-
 const BOUNDS_TOGGLE: bool = true;
-
-const P_COLOUR: [f32; 4] = [0.5, 0.5, 0.0, 0.0];
-
 const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 
 pub struct App {
-    event_loop: EventLoop<()>,
     instance: Instance,
     surface: Surface,
     window: Window,
-    particle_data: Vec<Particle>,
-    particle_offsets: [usize; 3],
+    game_state: GameState,
     adapter: Option<Adapter>,
     device: Option<Device>,
     queue: Option<Queue>,
@@ -43,6 +35,14 @@ pub struct App {
     index_buffer: Option<Buffer>,
 }
 
+struct GameState {
+    particle_data: Vec<Particle>,
+    particle_offsets: [i32; 4],
+    pub power_slider: Mat4,
+    pub r_slider: Mat4,
+    pub num_particles: UVec4,
+}
+
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Particle {
@@ -51,37 +51,14 @@ struct Particle {
     cls: u32,
 }
 
-fn init_particles(particle_data: &mut Vec<Particle>, particle_offsets: &[usize]) {
-    for (i, j) in (-1..4).into_iter().tuple_windows() {
-        let start = if i < 0 {
-            0
-        } else {
-            particle_offsets[i as usize]
-        };
-        let end = if j < 3 {
-            particle_offsets[j as usize]
-        } else {
-            NUM_PARTICLES
-        };
-
-        for _ in start..end {
-            particle_data.push(Particle {
-                pos: Vec2::new(
-                    thread_rng().gen_range(-0.5f32..=0.5f32),
-                    thread_rng().gen_range(-0.5f32..=0.5f32),
-                ),
-                vel: Vec2::new(
-                    thread_rng().gen_range(-0.005f32..=0.005f32),
-                    thread_rng().gen_range(-0.005f32..=0.005f32),
-                ),
-                cls: j as u32,
-            })
-        }
-    }
-}
-
 // Interaction between 2 particle groups
-fn interaction(group1: &[Particle], group2: &[Particle], g: f32, radius: f32) -> Vec<Particle> {
+fn interaction(
+    group1: &[Particle],
+    group2: &[Particle],
+    g: f32,
+    radius: f32,
+    viscosity: f32,
+) -> Vec<Particle> {
     let g = g / -10000000f32;
 
     group1
@@ -96,7 +73,7 @@ fn interaction(group1: &[Particle], group2: &[Particle], g: f32, radius: f32) ->
                 }
             });
 
-            let mut vel = p1.vel + f * g;
+            let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
             let pos = p1.pos + vel;
             if BOUNDS_TOGGLE {
                 //not good enough! Need fixing
@@ -118,28 +95,72 @@ fn interaction(group1: &[Particle], group2: &[Particle], g: f32, radius: f32) ->
 }
 
 impl App {
-    pub fn new() -> Self {
-        let event_loop = EventLoop::new();
-        let window = winit::window::Window::new(&event_loop).unwrap();
+    pub fn new(event_loop: &EventLoop<()>) -> Self {
+        let window = winit::window::Window::new(event_loop).unwrap();
         let instance = wgpu::Instance::new(wgpu::Backends::all());
         let surface = unsafe { instance.create_surface(&window) };
 
-        let particle_offsets = [
-            (NUM_PARTICLES as f32 * P_COLOUR[0]) as usize,
-            (NUM_PARTICLES as f32 * P_COLOUR[0]) as usize
-                + (NUM_PARTICLES as f32 * P_COLOUR[1]) as usize,
-            (NUM_PARTICLES as f32 * P_COLOUR[0]) as usize
-                + (NUM_PARTICLES as f32 * P_COLOUR[1]) as usize
-                + (NUM_PARTICLES as f32 * P_COLOUR[2]) as usize,
-        ];
+        let mut rng = rand::thread_rng();
+
+        let power_vals: [f32; 16] = (0..16)
+            .map(|_| rng.sample(&Uniform::new(-40f32, 40f32)))
+            .collect::<Vec<f32>>()
+            .try_into()
+            .unwrap();
+
+        let r_vals: [f32; 16] = (0..16)
+            .map(|_| rng.sample(&Uniform::new(0.01f32, 0.9f32)))
+            .collect::<Vec<f32>>()
+            .try_into()
+            .unwrap();
+
+        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
+
+        let game_state = GameState {
+            particle_data: Vec::with_capacity(
+                (num_particles.x + num_particles.y + num_particles.z + num_particles.w) as usize,
+            ),
+            particle_offsets: [
+                if num_particles.x > 0 { 0 } else { -1 },
+                if num_particles.y > 0 {
+                    num_particles.x as i32
+                } else {
+                    -1
+                },
+                if num_particles.z > 0 {
+                    (num_particles.x + num_particles.y) as i32
+                } else {
+                    -1
+                },
+                if num_particles.w > 0 {
+                    (num_particles.x + num_particles.y + num_particles.z) as i32
+                } else {
+                    -1
+                },
+            ],
+            power_slider: Mat4::from_cols_array(&power_vals),
+            r_slider: Mat4::from_cols_array(&r_vals),
+            // power_slider: Mat4::from_cols(
+            //     Vec4::new(1f32, 1f32, -10f32, 10f32),
+            //     Vec4::new(-20f32, 10f32, 10f32, 1f32),
+            //     Vec4::new(10f32, 1f32, 10f32, 10f32),
+            //     Vec4::new(1f32, -10f32, 10f32, 10f32),
+            // ),
+
+            // r_slider: Mat4::from_cols(
+            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
+            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
+            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
+            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
+            // ),
+            num_particles,
+        };
 
         App {
-            event_loop,
             instance,
             surface,
             window,
-            particle_offsets,
-            particle_data: Vec::with_capacity(NUM_PARTICLES),
+            game_state,
             adapter: None,
             config: None,
             device: None,
@@ -216,11 +237,11 @@ impl App {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        init_particles(&mut self.particle_data, &self.particle_offsets);
+        self.init_particles();
 
         let particle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Particle Buffer"),
-            contents: bytemuck::cast_slice(&self.particle_data),
+            contents: bytemuck::cast_slice(&self.game_state.particle_data),
             usage: wgpu::BufferUsages::VERTEX
                 // | wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST,
@@ -280,62 +301,91 @@ impl App {
         self.index_buffer = Some(index_buffer);
     }
 
-    fn update(
-        particle_data: &mut Vec<Particle>,
-        particle_offsets: &[usize],
-        buffer: &mut Buffer,
-        queue: &mut Queue,
-    ) {
-        // let red_slice = &mut particle_data[0..particle_offsets[0] as usize];
-        // let green_slice = &mut particle_data[particle_offsets[0]..particle_offsets[1] as usize];
-        // let blue_slice = &mut particle_data[particle_offsets[1]..particle_offsets[2] as usize];
-        // let white_slice = &mut particle_data[particle_offsets[2]..particle_offsets[3] as usize];
-
-        let power_slider = mat4(
-            Vec4::new(10f32, 10f32, 10f32, 10f32),
-            Vec4::new(10f32, 10f32, 10f32, 10f32),
-            Vec4::new(10f32, 10f32, 10f32, 10f32),
-            Vec4::new(10f32, 10f32, 10f32, 10f32),
-        );
-
-        let r_slider = mat4(
-            Vec4::new(1f32, 1f32, 1f32, 1f32),
-            Vec4::new(1f32, 1f32, 1f32, 1f32),
-            Vec4::new(1f32, 1f32, 1f32, 1f32),
-            Vec4::new(1f32, 1f32, 1f32, 1f32),
-        );
-
+    fn init_particles(&mut self) {
         for i in 0..4 {
-            for j in 0..4 {
-                let group1_start = if i == 0 { 0 } else { particle_offsets[i - 1] };
+            if self.game_state.particle_offsets[i as usize] < 0 {
+                continue;
+            }
 
-                let group2_start = if j == 0 { 0 } else { particle_offsets[j - 1] };
-
-                let group1_end = if i == 3 {
-                    NUM_PARTICLES
-                } else {
-                    particle_offsets[i]
-                };
-
-                let group2_end = if j == 3 {
-                    NUM_PARTICLES
-                } else {
-                    particle_offsets[j]
-                };
-                let new_particle_data = interaction(
-                    &particle_data[group1_start..group1_end],
-                    &particle_data[group2_start..group2_end],
-                    power_slider.col(i)[j],
-                    r_slider.col(i)[j],
+            let start = self.game_state.particle_offsets[i as usize];
+            let end = self
+                .game_state
+                .particle_offsets
+                .into_iter()
+                .skip(i + 1)
+                .find(|&item| item > 0)
+                .unwrap_or(
+                    (self.game_state.num_particles.x
+                        + self.game_state.num_particles.y
+                        + self.game_state.num_particles.z
+                        + self.game_state.num_particles.w) as i32,
                 );
-                particle_data.splice(group1_start..group1_end, new_particle_data);
+
+            for _ in start..end {
+                self.game_state.particle_data.push(Particle {
+                    pos: Vec2::new(
+                        thread_rng().gen_range(-1f32..=1f32),
+                        thread_rng().gen_range(-1f32..=1f32),
+                    ),
+                    vel: Vec2::new(
+                        thread_rng().gen_range(-0.005f32..=0.005f32),
+                        thread_rng().gen_range(-0.005f32..=0.005f32),
+                    ),
+                    cls: i as u32,
+                })
+            }
+        }
+    }
+
+    fn update(&mut self, buffer: &mut Buffer, queue: &mut Queue) {
+        for (i, group1_start) in self.game_state.particle_offsets.into_iter().enumerate() {
+            if group1_start < 0 {
+                continue;
+            }
+
+            let group1_end =
+                self.game_state
+                    .particle_offsets
+                    .into_iter()
+                    .skip(i + 1)
+                    .find(|&item| item > 0)
+                    .unwrap_or(self.game_state.particle_data.len() as i32) as usize;
+
+            for (j, group2_start) in self.game_state.particle_offsets.into_iter().enumerate() {
+                if group2_start < 0 {
+                    continue;
+                }
+
+                let group2_end = self
+                    .game_state
+                    .particle_offsets
+                    .into_iter()
+                    .skip(j + 1)
+                    .find(|&item| item > 0)
+                    .unwrap_or(self.game_state.particle_data.len() as i32)
+                    as usize;
+
+                let new_particle_data = interaction(
+                    &self.game_state.particle_data[group1_start as usize..group1_end],
+                    &self.game_state.particle_data[group2_start as usize..group2_end],
+                    self.game_state.power_slider.col(i)[j],
+                    self.game_state.r_slider.col(i)[j],
+                    0.01f32,
+                );
+                self.game_state
+                    .particle_data
+                    .splice(group1_start as usize..group1_end, new_particle_data);
             }
         }
 
-        queue.write_buffer(buffer, 0, bytemuck::cast_slice(&particle_data));
+        queue.write_buffer(
+            buffer,
+            0,
+            bytemuck::cast_slice(&self.game_state.particle_data),
+        );
     }
 
-    pub async fn run(mut self) {
+    pub async fn run(mut self, event_loop: EventLoop<()>) {
         let mut config = self.config.take().unwrap();
         let device = self.device.take();
         let mut queue = self.queue.take();
@@ -343,9 +393,11 @@ impl App {
         let mut particle_buffer = self.particle_buffer.take();
         let vertices_buffer = self.vertex_buffer.take();
 
+        let num_particles = self.game_state.particle_data.len();
+
         let mut last_update_inst = Instant::now();
 
-        self.event_loop.run(move |event, _, control_flow| {
+        event_loop.run(move |event, _, control_flow| {
             // Have the closure take ownership of the resources.
             // `event_loop.run` never returns, therefore we must do this to ensure
             // the resources are properly cleaned up.
@@ -375,12 +427,7 @@ impl App {
                             1000u128 / time_since_last_frame.as_millis()
                         );
 
-                        Self::update(
-                            &mut self.particle_data,
-                            &self.particle_offsets,
-                            particle_buffer.as_mut().unwrap(),
-                            queue.as_mut().unwrap(),
-                        );
+                        self.update(particle_buffer.as_mut().unwrap(), queue.as_mut().unwrap());
                     } else {
                         // exit(0);
                         *control_flow = ControlFlow::WaitUntil(
@@ -421,7 +468,7 @@ impl App {
                         rpass.set_vertex_buffer(0, particle_buffer.as_ref().unwrap().slice(..));
                         rpass.set_vertex_buffer(1, vertices_buffer.as_ref().unwrap().slice(..));
                         // rpass.draw(0..6, 0..NUM_PARTICLES);
-                        rpass.draw_indexed(0..6 as u32, 0, 0..NUM_PARTICLES as u32);
+                        rpass.draw_indexed(0..6 as u32, 0, 0..num_particles as u32);
                         // device.as_ref().unwrap().poll(wgpu::Maintain::Wait);
                     }
 
