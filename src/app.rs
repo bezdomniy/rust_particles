@@ -73,6 +73,10 @@ fn interaction(
                 }
             });
 
+            if f.length() < f32::EPSILON {
+                return *p1;
+            }
+
             let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
             let pos = p1.pos + vel;
             if BOUNDS_TOGGLE {
