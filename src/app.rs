@@ -1,4 +1,4 @@
-use glam::{Mat4, UVec4, Vec2, Vec4};
+use glam::{Mat4, UVec4, Vec2};
 use rand::{distributions::Uniform, thread_rng, Rng};
 use rayon::prelude::*;
 use std::{
@@ -10,8 +10,9 @@ use wgpu::{
     SurfaceConfiguration,
 };
 use winit::{
+    dpi::PhysicalSize,
     event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
+    event_loop::{ControlFlow, EventLoopWindowTarget},
     window::Window,
 };
 
@@ -23,7 +24,6 @@ const PARTICLE_SIZE: f32 = 2f32;
 pub struct App {
     instance: Instance,
     surface: Surface,
-    window: Window,
     game_state: GameState,
     adapter: Option<Adapter>,
     device: Option<Device>,
@@ -59,17 +59,27 @@ fn interaction(
     radius: f32,
     viscosity: f32,
 ) -> Vec<Particle> {
-    let g = g / -10000000f32;
+    let g = g / 10000000f32;
 
     group1
         .par_iter()
         .map(|p1| {
             let mut f = Vec2::new(0f32, 0f32);
             group2.iter().for_each(|p2| {
+                // let d_sq = p1.pos.distance_squared(p2.pos);
+
+                // let force = if d_sq < radius * radius && d_sq > 0f32 {
+                //     1f32 / d_sq.sqrt()
+                // } else {
+                //     0f32
+                // };
+
+                // f += (p1.pos - p2.pos) * force;
+
                 let d = p1.pos - p2.pos;
                 let r = d.length();
                 if r < radius && r > 0f32 {
-                    f += d / r;
+                    f += d.normalize() / r;
                 }
             });
 
@@ -99,8 +109,7 @@ fn interaction(
 }
 
 impl App {
-    pub fn new(event_loop: &EventLoop<()>) -> Self {
-        let window = winit::window::Window::new(event_loop).unwrap();
+    pub fn new(window: &Window) -> Self {
         let instance = wgpu::Instance::new(wgpu::Backends::all());
         let surface = unsafe { instance.create_surface(&window) };
 
@@ -163,7 +172,6 @@ impl App {
         App {
             instance,
             surface,
-            window,
             game_state,
             adapter: None,
             config: None,
@@ -176,8 +184,7 @@ impl App {
         }
     }
 
-    pub async fn setup(&mut self) {
-        let size = self.window.inner_size();
+    pub async fn setup(&mut self, physical_size: PhysicalSize<u32>) {
         let adapter = self
             .instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -288,8 +295,8 @@ impl App {
         self.config = Some(wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: swapchain_format,
-            width: size.width,
-            height: size.height,
+            width: physical_size.width,
+            height: physical_size.height,
             present_mode: wgpu::PresentMode::Fifo,
         });
 
@@ -341,7 +348,7 @@ impl App {
         }
     }
 
-    fn update(&mut self, buffer: &mut Buffer, queue: &mut Queue) {
+    fn update(&mut self) {
         for (i, group1_start) in self.game_state.particle_offsets.into_iter().enumerate() {
             if group1_start < 0 {
                 continue;
@@ -374,7 +381,7 @@ impl App {
                     &self.game_state.particle_data[group2_start as usize..group2_end],
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
-                    0.01f32,
+                    0.1f32,
                 );
                 self.game_state
                     .particle_data
@@ -382,109 +389,103 @@ impl App {
             }
         }
 
-        queue.write_buffer(
-            buffer,
+        self.queue.as_ref().unwrap().write_buffer(
+            self.particle_buffer.as_mut().unwrap(),
             0,
             bytemuck::cast_slice(&self.game_state.particle_data),
         );
     }
 
-    pub async fn run(mut self, event_loop: EventLoop<()>) {
-        let mut config = self.config.take().unwrap();
-        let device = self.device.take();
-        let mut queue = self.queue.take();
-        let render_pipeline = self.render_pipeline.take();
-        let mut particle_buffer = self.particle_buffer.take();
-        let vertices_buffer = self.vertex_buffer.take();
+    pub fn main_loop<T>(
+        &mut self,
+        event: Event<()>,
+        _target: &EventLoopWindowTarget<T>,
+        control_flow: &mut ControlFlow,
+        last_update_inst: &mut Instant,
+    ) {
+        let device = self.device.as_ref().unwrap();
+        let queue = self.queue.as_ref().unwrap();
+        let render_pipeline = self.render_pipeline.as_ref().unwrap();
+        let particle_buffer = self.particle_buffer.as_ref().unwrap();
+        let vertices_buffer = self.vertex_buffer.as_ref().unwrap();
 
         let num_particles = self.game_state.particle_data.len();
 
-        let mut last_update_inst = Instant::now();
-
-        event_loop.run(move |event, _, control_flow| {
-            // Have the closure take ownership of the resources.
-            // `event_loop.run` never returns, therefore we must do this to ensure
-            // the resources are properly cleaned up.
-            // let _ = (&self);
-            let _ = (&self.instance, &self.adapter, &device);
-
-            match event {
-                Event::WindowEvent {
-                    event: WindowEvent::Resized(size),
-                    ..
-                } => {
-                    // Reconfigure the surface with the new size
-                    config.width = size.width;
-                    config.height = size.height;
-                    self.surface.configure(&device.as_ref().unwrap(), &config);
-                    // On macos the window needs to be redrawn manually after resizing
-                    self.window.request_redraw();
-                }
-                Event::RedrawEventsCleared => {
-                    let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE as f64);
-                    let time_since_last_frame = last_update_inst.elapsed();
-
-                    if time_since_last_frame >= target_frametime {
-                        last_update_inst = Instant::now();
-                        log::info!(
-                            "Framerate: {}",
-                            1000u128 / time_since_last_frame.as_millis()
-                        );
-
-                        self.update(particle_buffer.as_mut().unwrap(), queue.as_mut().unwrap());
-                    } else {
-                        // exit(0);
-                        *control_flow = ControlFlow::WaitUntil(
-                            Instant::now() + target_frametime - time_since_last_frame,
-                        );
-                    }
-                }
-                Event::MainEventsCleared => {
-                    let frame = self
-                        .surface
-                        .get_current_texture()
-                        .expect("Failed to acquire next swap chain texture");
-                    let view = frame
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-                    let mut encoder = device
-                        .as_ref()
-                        .unwrap()
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-                    {
-                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: None,
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &view,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: true,
-                                },
-                            })],
-                            depth_stencil_attachment: None,
-                        });
-                        rpass.set_pipeline(&render_pipeline.as_ref().unwrap());
-                        rpass.set_index_buffer(
-                            self.index_buffer.as_ref().unwrap().slice(..),
-                            wgpu::IndexFormat::Uint16,
-                        );
-                        rpass.set_vertex_buffer(0, particle_buffer.as_ref().unwrap().slice(..));
-                        rpass.set_vertex_buffer(1, vertices_buffer.as_ref().unwrap().slice(..));
-                        // rpass.draw(0..6, 0..NUM_PARTICLES);
-                        rpass.draw_indexed(0..6 as u32, 0, 0..num_particles as u32);
-                        // device.as_ref().unwrap().poll(wgpu::Maintain::Wait);
-                    }
-
-                    queue.as_ref().unwrap().submit(Some(encoder.finish()));
-                    frame.present();
-                }
-                Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                } => *control_flow = ControlFlow::Exit,
-                _ => {}
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::Resized(size),
+                ..
+            } => {
+                // Reconfigure the surface with the new size
+                self.config.as_mut().unwrap().width = size.width;
+                self.config.as_mut().unwrap().height = size.height;
+                self.surface
+                    .configure(&device, &self.config.as_ref().unwrap());
+                // On macos the window needs to be redrawn manually after resizing
+                // self.window.request_redraw();
             }
-        });
+            Event::RedrawEventsCleared => {
+                let target_frametime = Duration::from_secs_f64(1.0 / FRAMERATE as f64);
+                let time_since_last_frame = last_update_inst.elapsed();
+
+                if time_since_last_frame >= target_frametime {
+                    *last_update_inst = Instant::now();
+                    log::info!(
+                        "Framerate: {}",
+                        1000u128 / time_since_last_frame.as_millis()
+                    );
+
+                    self.update();
+                } else {
+                    // exit(0);
+                    *control_flow = ControlFlow::WaitUntil(
+                        Instant::now() + target_frametime - time_since_last_frame,
+                    );
+                }
+            }
+            Event::MainEventsCleared => {
+                let frame = self
+                    .surface
+                    .get_current_texture()
+                    .expect("Failed to acquire next swap chain texture");
+                let view = frame
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                let mut encoder =
+                    device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                {
+                    let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: None,
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: true,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                    });
+                    rpass.set_pipeline(render_pipeline);
+                    rpass.set_index_buffer(
+                        self.index_buffer.as_ref().unwrap().slice(..),
+                        wgpu::IndexFormat::Uint16,
+                    );
+                    rpass.set_vertex_buffer(0, particle_buffer.slice(..));
+                    rpass.set_vertex_buffer(1, vertices_buffer.slice(..));
+                    // rpass.draw(0..6, 0..NUM_PARTICLES);
+                    rpass.draw_indexed(0..6 as u32, 0, 0..num_particles as u32);
+                    // device.as_ref().unwrap().poll(wgpu::Maintain::Wait);
+                }
+
+                queue.submit(Some(encoder.finish()));
+                frame.present();
+            }
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => *control_flow = ControlFlow::Exit,
+            _ => {}
+        };
     }
 }
