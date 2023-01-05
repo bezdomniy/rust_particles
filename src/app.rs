@@ -1,3 +1,4 @@
+use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distributions::Uniform, thread_rng, Rng};
 use std::{borrow::Cow, sync::Arc};
@@ -502,15 +503,17 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::Frame::canvas(ui.style()).show(ui, |ui| {
-                self.update();
-                // log::info!(
-                //     "FPS: {:?}",
-                //     1000u128 / self.last_update_inst.elapsed().as_millis()
-                // );
-                self.draw_app(ui);
-                ctx.request_repaint();
-            })
+            egui::Frame::canvas(ui.style())
+                .fill(Color32::BLACK)
+                .show(ui, |ui| {
+                    self.update();
+                    // log::info!(
+                    //     "FPS: {:?}",
+                    //     1000u128 / self.last_update_inst.elapsed().as_millis()
+                    // );
+                    self.draw_app(ui);
+                    ctx.request_repaint();
+                })
         });
     }
 }
