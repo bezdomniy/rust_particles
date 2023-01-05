@@ -1,6 +1,6 @@
 #[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    env_logger::init();
+    tracing_subscriber::fmt::init();
     let options = eframe::NativeOptions::default();
 
     eframe::run_native(
@@ -12,7 +12,11 @@ fn main() {
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
+    // Make sure panics are logged using `console.error`.
     console_error_panic_hook::set_once();
+
+    // Redirect tracing to console.log and friends:
+    tracing_wasm::set_as_global_default();
 
     let options = eframe::WebOptions::default();
 
