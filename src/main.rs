@@ -1,21 +1,32 @@
-use std::time::Instant;
-use winit::event_loop::EventLoop;
-mod app;
-
-use app::App;
-
+#[cfg(not(target_arch = "wasm32"))]
 fn main() {
-    env_logger::init();
+    tracing_subscriber::fmt::init();
+    let options = eframe::NativeOptions::default();
 
-    let event_loop = EventLoop::new();
-    let window = winit::window::Window::new(&event_loop).unwrap();
-    let mut particles_app = App::new(&window);
-    // particles_app.setup(window.inner_size()).await;
-    pollster::block_on(particles_app.setup(window.inner_size()));
+    eframe::run_native(
+        "Particles",
+        options,
+        Box::new(|cc| Box::new(rust_particles::App::new(cc))),
+    );
+}
 
-    let mut now = Instant::now();
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    // Make sure panics are logged using `console.error`.
+    console_error_panic_hook::set_once();
 
-    event_loop.run(move |event, target, control_flow| {
-        particles_app.main_loop(event, target, control_flow, &mut now)
+    // Redirect tracing to console.log and friends:
+    tracing_wasm::set_as_global_default();
+
+    let options = eframe::WebOptions::default();
+
+    wasm_bindgen_futures::spawn_local(async {
+        eframe::start_web(
+            "canvas",
+            options,
+            Box::new(|cc| Box::new(rust_particles::App::new(cc))),
+        )
+        .await
+        .expect("failed to start eframe");
     });
 }
