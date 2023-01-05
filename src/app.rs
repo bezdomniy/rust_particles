@@ -27,7 +27,7 @@ const PARTICLE_SIZE: f32 = 2f32;
 
 pub struct App {
     game_state: GameState,
-    // last_update_inst: Instant,
+    last_update_inst: Instant,
     target_frame_time: Duration,
 }
 
@@ -340,7 +340,7 @@ impl App {
 
         Self {
             game_state,
-            // last_update_inst: Instant::now(),
+            last_update_inst: Instant::now(),
             target_frame_time: Duration::from_secs_f64(1.0 / FRAMERATE as f64),
         }
 
@@ -507,10 +507,10 @@ impl eframe::App for App {
                 .fill(Color32::BLACK)
                 .show(ui, |ui| {
                     self.update();
-                    // log::info!(
-                    //     "FPS: {:?}",
-                    //     1000u128 / self.last_update_inst.elapsed().as_millis()
-                    // );
+                    log::info!(
+                        "FPS: {:?}",
+                        1000u128 / self.last_update_inst.elapsed().as_millis()
+                    );
                     self.draw_app(ui);
                     ctx.request_repaint();
                 })
@@ -542,7 +542,7 @@ impl App {
         };
 
         ui.painter().add(callback);
-        // self.last_update_inst = Instant::now();
+        self.last_update_inst = Instant::now();
     }
 }
 
