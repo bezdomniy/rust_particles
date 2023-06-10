@@ -3,7 +3,7 @@ use glam::{Mat4, UVec4, Vec2};
 use rand::{distributions::Uniform, thread_rng, Rng};
 use std::{borrow::Cow, sync::Arc};
 
-#[cfg(not(target_arch = "wasm32"))]
+// #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 
 #[cfg(target_arch = "wasm32")]
 use instant::{Duration, Instant};
+#[cfg(target_arch = "wasm32")]
+pub use wasm_bindgen_rayon::init_thread_pool;
 
 use eframe::{
     egui_wgpu::{
@@ -94,9 +96,9 @@ fn interaction(
 ) -> Vec<Particle> {
     let g = g / 10000000f32;
 
-    #[cfg(target_arch = "wasm32")]
-    let g_iter = group1.iter();
-    #[cfg(not(target_arch = "wasm32"))]
+    // #[cfg(target_arch = "wasm32")]
+    // let g_iter = group1.iter();
+    // #[cfg(not(target_arch = "wasm32"))]
     let g_iter = group1.par_iter();
 
     g_iter
@@ -164,6 +166,10 @@ impl App {
             .try_into()
             .unwrap();
 
+        #[cfg(target_arch = "wasm32")]
+        let num_particles = UVec4::new(1000, 1000, 1000, 1000);
+
+        #[cfg(not(target_arch = "wasm32"))]
         let num_particles = UVec4::new(3000, 3000, 3000, 3000);
 
         let mut game_state = GameState {

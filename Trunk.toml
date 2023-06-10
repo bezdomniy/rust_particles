@@ -1,2 +1,5 @@
 [build]
+pattern_script = '''
+<script type="module">import init, { initThreadPool} from '{base}{js}';await init(); await initThreadPool(navigator.hardwareConcurrency);</script>
+'''
 filehash = false

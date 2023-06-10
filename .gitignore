@@ -17,3 +17,5 @@ Cargo.lock
 .idea/
 dist/
 pkg/
+
+.DS_Store
