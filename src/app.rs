@@ -42,11 +42,11 @@ struct GameState {
 impl GameState {
     fn init_particles(&mut self) {
         for i in 0..4 {
-            if self.particle_offsets[i as usize] < 0 {
+            if self.particle_offsets[i] < 0 {
                 continue;
             }
 
-            let start = self.particle_offsets[i as usize];
+            let start = self.particle_offsets[i];
             let end = self
                 .particle_offsets
                 .into_iter()
@@ -153,18 +153,18 @@ impl App {
         let mut rng = rand::thread_rng();
 
         let power_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(&Uniform::new(-40f32, 40f32)))
+            .map(|_| rng.sample(Uniform::new(-40f32, 40f32)))
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap();
 
         let r_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(&Uniform::new(0.01f32, 0.9f32)))
+            .map(|_| rng.sample(Uniform::new(0.01f32, 0.9f32)))
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap();
 
-        let num_particles = UVec4::new(300, 300, 300, 300);
+        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
 
         let mut game_state = GameState {
             particle_data: Vec::with_capacity(
@@ -554,7 +554,7 @@ struct RenderResources {
 }
 
 impl RenderResources {
-    fn prepare(&self, _device: &Device, queue: &Queue, particle_data: &Vec<Particle>) {
+    fn prepare(&self, _device: &Device, queue: &Queue, particle_data: &[Particle]) {
         queue.write_buffer(
             &self.particle_buffer,
             0,
@@ -567,6 +567,6 @@ impl RenderResources {
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
         render_pass.set_vertex_buffer(0, self.particle_buffer.slice(..));
         render_pass.set_vertex_buffer(1, self.vertex_buffer.slice(..));
-        render_pass.draw_indexed(0..6 as u32, 0, 0..num_particles as u32);
+        render_pass.draw_indexed(0..6u32, 0, 0..num_particles as u32);
     }
 }
