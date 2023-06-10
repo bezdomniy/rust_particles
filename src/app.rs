@@ -30,7 +30,7 @@ const PARTICLE_SIZE: f32 = 2f32;
 pub struct App {
     game_state: GameState,
     last_update_inst: Instant,
-    target_frame_time: Duration,
+    _target_frame_time: Duration,
 }
 
 struct GameState {
@@ -347,7 +347,7 @@ impl App {
         Self {
             game_state,
             last_update_inst: Instant::now(),
-            target_frame_time: Duration::from_secs_f64(1.0 / FRAMERATE as f64),
+            _target_frame_time: Duration::from_secs_f64(1.0 / FRAMERATE as f64),
         }
 
         // self.config = Some(wgpu::SurfaceConfiguration {
