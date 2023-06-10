@@ -507,7 +507,7 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::Frame::canvas(ui.style())
                 .fill(Color32::BLACK)
@@ -526,7 +526,7 @@ impl eframe::App for App {
 
 impl App {
     fn draw_app(&mut self, ui: &mut egui::Ui) {
-        let (rect, response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::drag());
+        let (rect, _response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::drag());
 
         let particle_data = self.game_state.particle_data.clone();
         let particle_data_len = particle_data.len();
@@ -537,7 +537,7 @@ impl App {
                 resources.prepare(device, queue, &particle_data);
                 Vec::new()
             })
-            .paint(move |info, render_pass, paint_callback_resources| {
+            .paint(move |_info, render_pass, paint_callback_resources| {
                 let resources: &RenderResources = paint_callback_resources.get().unwrap();
                 resources.paint(render_pass, particle_data_len);
             });
