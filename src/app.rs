@@ -26,6 +26,7 @@ const FRAMERATE: u32 = 30;
 const BOUNDS_TOGGLE: bool = true;
 const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
+const MAX_VELOCITY: f32 = 0.1f32;
 
 pub struct App {
     game_state: GameState,
@@ -68,8 +69,8 @@ impl GameState {
                         thread_rng().gen_range(-1f32..=1f32),
                     ),
                     vel: Vec2::new(
-                        thread_rng().gen_range(-0.005f32..=0.005f32),
-                        thread_rng().gen_range(-0.005f32..=0.005f32),
+                        thread_rng().gen_range(-0.001f32..=0.001f32),
+                        thread_rng().gen_range(-0.001f32..=0.001f32),
                     ),
                     cls: i as u32,
                 })
@@ -94,8 +95,6 @@ fn interaction(
     radius: f32,
     viscosity: f32,
 ) -> Vec<Particle> {
-    let g = g / 10000000f32;
-
     #[cfg(target_arch = "wasm32")]
     let g_iter = group1.iter();
     #[cfg(not(target_arch = "wasm32"))]
@@ -118,7 +117,7 @@ fn interaction(
                 let d = p1.pos - p2.pos;
                 let r = d.length();
                 if r < radius && r > 0f32 {
-                    f += d.normalize() / r;
+                    f += (g * d.normalize()) / r;
                 }
             });
 
@@ -126,17 +125,24 @@ fn interaction(
                 return *p1;
             }
 
-            let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
-            let pos = p1.pos + vel;
+            // let mut vel = p1.vel;
+            // let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
+            let mut vel = (p1.vel * (1f32 - viscosity)) + (f * 0.00001f32);
+
+            if vel.length() > MAX_VELOCITY {
+                vel = vel.normalize() * MAX_VELOCITY;
+            }
+
             if BOUNDS_TOGGLE {
                 //not good enough! Need fixing
-                if (pos.x >= 1f32) || (pos.x <= -1f32) {
+                if (p1.pos.x >= 1f32) || (p1.pos.x <= -1f32) {
                     vel.x *= -1f32;
                 }
-                if (pos.y >= 1f32) || (pos.y <= -1f32) {
+                if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
                     vel.y *= -1f32;
                 }
             }
+            let pos = p1.pos + vel;
 
             Particle {
                 pos,
@@ -155,7 +161,7 @@ impl App {
         let mut rng = rand::thread_rng();
 
         let power_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(-40f32, 40f32)))
+            .map(|_| rng.sample(Uniform::new(-1f32, 1f32)))
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap();
@@ -403,7 +409,7 @@ impl App {
                     &self.game_state.particle_data[group2_start as usize..group2_end],
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
-                    0.1f32,
+                    0.5f32,
                 );
                 self.game_state
                     .particle_data
