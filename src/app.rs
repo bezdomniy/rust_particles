@@ -4,6 +4,8 @@ use rand::{distributions::Uniform, thread_rng, Rng};
 use std::{borrow::Cow, sync::Arc};
 
 #[cfg(not(target_arch = "wasm32"))]
+use rayon::iter::ParallelBridge;
+#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -151,6 +153,20 @@ fn interaction(
             }
         })
         .collect()
+}
+
+fn interaction2(p1: &mut Particle, p2: &Particle, g: f32, radius: f32, viscosity: f32) {
+    let mut f = Vec2::new(0f32, 0f32);
+
+    let d = p1.pos - p2.pos;
+    let r = d.length();
+    if r < radius && r > 0f32 {
+        f += (g * d.normalize()) / r;
+    }
+
+    if f.length() < f32::EPSILON {
+        return;
+    }
 }
 
 impl App {
@@ -376,6 +392,60 @@ impl App {
         // self.index_buffer = Some(index_buffer);
     }
 
+    fn update2(&mut self) {
+        let copy_particles = self.game_state.particle_data.clone();
+        self.game_state
+            .particle_data
+            .iter_mut()
+            .enumerate()
+            .par_bridge()
+            .for_each(|(i, p1)| {
+                // TODO: fix the indexes
+                let power_col = self.game_state.power_slider.col(i / 3000);
+                let r_col = self.game_state.r_slider.col(i / 3000);
+                let f: Vec2 = copy_particles.iter().enumerate().fold(
+                    Vec2::new(0f32, 0f32),
+                    |acc, (j, p2)| {
+                        if i == j {
+                            return acc;
+                        }
+
+                        let d = p1.pos - p2.pos;
+                        let r = d.length();
+                        // TODO: fix the indexes
+                        if !(r < r_col[j / 3000] && r > 0f32) {
+                            return acc;
+                        }
+                        acc + ((power_col[j / 3000] * d.normalize()) / r)
+                    },
+                );
+
+                if f.length() < f32::EPSILON {
+                    return;
+                }
+                // let mut vel = p1.vel;
+                // let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
+                let mut vel = (p1.vel * (1f32 - 0.5f32)) + (f * 0.00001f32);
+
+                if vel.length() > MAX_VELOCITY {
+                    vel = vel.normalize() * MAX_VELOCITY;
+                }
+
+                if BOUNDS_TOGGLE {
+                    //not good enough! Need fixing
+                    if (p1.pos.x >= 1f32) || (p1.pos.x <= -1f32) {
+                        vel.x *= -1f32;
+                    }
+                    if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
+                        vel.y *= -1f32;
+                    }
+                }
+                p1.pos = p1.pos + vel;
+                p1.vel = vel;
+                // p1.pos += vel;
+            });
+    }
+
     fn update(&mut self) {
         for (i, group1_start) in self.game_state.particle_offsets.into_iter().enumerate() {
             if group1_start < 0 {
@@ -518,7 +588,8 @@ impl eframe::App for App {
             egui::Frame::canvas(ui.style())
                 .fill(Color32::BLACK)
                 .show(ui, |ui| {
-                    self.update();
+                    // self.update();
+                    self.update2();
                     log::info!(
                         "FPS: {:?}",
                         1000u128 / self.last_update_inst.elapsed().as_millis()
