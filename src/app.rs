@@ -1,7 +1,7 @@
 use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distributions::Uniform, thread_rng, Rng};
-use std::{borrow::Cow, sync::Arc};
+use std::borrow::Cow;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -342,7 +342,8 @@ impl App {
         wgpu_render_state
             .renderer
             .write()
-            .paint_callback_resources
+            // .paint_callback_resources
+            .callback_resources
             .insert(RenderResources {
                 render_pipeline,
                 index_buffer,
@@ -530,30 +531,44 @@ impl eframe::App for App {
     }
 }
 
+struct CustomCallback {
+    particle_data: Vec<Particle>,
+}
+
+impl egui_wgpu::CallbackTrait for CustomCallback {
+    fn prepare(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        _egui_encoder: &mut wgpu::CommandEncoder,
+        resources: &mut egui_wgpu::CallbackResources,
+    ) -> Vec<wgpu::CommandBuffer> {
+        let resources: &RenderResources = resources.get().unwrap();
+        resources.prepare(device, queue, &self.particle_data);
+        Vec::new()
+    }
+
+    fn paint<'a>(
+        &self,
+        _info: egui::PaintCallbackInfo,
+        render_pass: &mut wgpu::RenderPass<'a>,
+        resources: &'a egui_wgpu::CallbackResources,
+    ) {
+        let resources: &RenderResources = resources.get().unwrap();
+        resources.paint(render_pass, self.particle_data.len());
+    }
+}
+
 impl App {
     fn draw_app(&mut self, ui: &mut egui::Ui) {
         let (rect, _response) = ui.allocate_exact_size(ui.available_size(), egui::Sense::drag());
 
-        let particle_data = self.game_state.particle_data.clone();
-        let particle_data_len = particle_data.len();
-
-        let cb = egui_wgpu::CallbackFn::new()
-            .prepare(move |device, queue, _encoder, paint_callback_resources| {
-                let resources: &RenderResources = paint_callback_resources.get().unwrap();
-                resources.prepare(device, queue, &particle_data);
-                Vec::new()
-            })
-            .paint(move |_info, render_pass, paint_callback_resources| {
-                let resources: &RenderResources = paint_callback_resources.get().unwrap();
-                resources.paint(render_pass, particle_data_len);
-            });
-
-        let callback = egui::PaintCallback {
+        ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
-            callback: Arc::new(cb),
-        };
-
-        ui.painter().add(callback);
+            CustomCallback {
+                particle_data: self.game_state.particle_data.clone(),
+            },
+        ));
         self.last_update_inst = Instant::now();
     }
 }
