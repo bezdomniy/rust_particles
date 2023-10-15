@@ -391,18 +391,17 @@ impl App {
     }
 
     fn update2(&mut self) {
-        let copy_particles = self.game_state.particle_data.clone();
-        let num_particles = copy_particles.len() / 4;
-        self.game_state
+        let num_particles = self.game_state.particle_data.len() / 4;
+        self.game_state.particle_data = self
+            .game_state
             .particle_data
-            .par_iter_mut()
-            // .iter_mut()
+            .par_iter()
             .enumerate()
-            .for_each(|(i, p1)| {
+            .map(|(i, p1)| {
                 // TODO: fix the indexes
                 let power_col = self.game_state.power_slider.col(i / num_particles);
                 let r_col = self.game_state.r_slider.col(i / num_particles);
-                let f: Vec2 = copy_particles.iter().enumerate().fold(
+                let f: Vec2 = self.game_state.particle_data.iter().enumerate().fold(
                     Vec2::new(0f32, 0f32),
                     |acc, (j, p2)| {
                         if i == j {
@@ -420,7 +419,7 @@ impl App {
                 );
 
                 if f.length() < f32::EPSILON {
-                    return;
+                    return *p1;
                 }
                 // let mut vel = p1.vel;
                 // let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
@@ -439,10 +438,17 @@ impl App {
                         vel.y *= -1f32;
                     }
                 }
-                p1.pos = p1.pos + vel;
-                p1.vel = vel;
+                let pos = p1.pos + vel;
+                // p1.vel = vel;
                 // p1.pos += vel;
-            });
+
+                Particle {
+                    pos,
+                    vel,
+                    cls: p1.cls,
+                }
+            })
+            .collect();
     }
 
     fn update(&mut self) {
