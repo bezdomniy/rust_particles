@@ -396,9 +396,8 @@ impl App {
         let copy_particles = self.game_state.particle_data.clone();
         self.game_state
             .particle_data
-            .iter_mut()
+            .par_iter_mut()
             .enumerate()
-            .par_bridge()
             .for_each(|(i, p1)| {
                 // TODO: fix the indexes
                 let power_col = self.game_state.power_slider.col(i / 3000);
