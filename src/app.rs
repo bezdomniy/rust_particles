@@ -4,8 +4,6 @@ use rand::{distributions::Uniform, thread_rng, Rng};
 use std::{borrow::Cow, sync::Arc};
 
 #[cfg(not(target_arch = "wasm32"))]
-use rayon::iter::ParallelBridge;
-#[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -394,14 +392,16 @@ impl App {
 
     fn update2(&mut self) {
         let copy_particles = self.game_state.particle_data.clone();
+        let num_particles = copy_particles.len() / 4;
         self.game_state
             .particle_data
             .par_iter_mut()
+            // .iter_mut()
             .enumerate()
             .for_each(|(i, p1)| {
                 // TODO: fix the indexes
-                let power_col = self.game_state.power_slider.col(i / 3000);
-                let r_col = self.game_state.r_slider.col(i / 3000);
+                let power_col = self.game_state.power_slider.col(i / num_particles);
+                let r_col = self.game_state.r_slider.col(i / num_particles);
                 let f: Vec2 = copy_particles.iter().enumerate().fold(
                     Vec2::new(0f32, 0f32),
                     |acc, (j, p2)| {
@@ -412,10 +412,10 @@ impl App {
                         let d = p1.pos - p2.pos;
                         let r = d.length();
                         // TODO: fix the indexes
-                        if !(r < r_col[j / 3000] && r > 0f32) {
+                        if !(r < r_col[j / num_particles] && r > 0f32) {
                             return acc;
                         }
-                        acc + ((power_col[j / 3000] * d.normalize()) / r)
+                        acc + ((power_col[j / num_particles] * d.normalize()) / r)
                     },
                 );
 
