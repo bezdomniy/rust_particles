@@ -3,7 +3,7 @@ fn main() {
     tracing_subscriber::fmt::init();
     let options = eframe::NativeOptions::default();
 
-    eframe::run_native(
+    let _ = eframe::run_native(
         "Particles",
         options,
         Box::new(|cc| Box::new(rust_particles::App::new(cc))),
