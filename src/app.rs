@@ -4,15 +4,13 @@ use rand::{distributions::Uniform, thread_rng, Rng};
 use std::borrow::Cow;
 
 #[cfg(not(target_arch = "wasm32"))]
-use rayon::prelude::*;
-
-#[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 
 #[cfg(target_arch = "wasm32")]
 use instant::{Duration, Instant};
-// #[cfg(target_arch = "wasm32")]
-// pub use wasm_bindgen_rayon::init_thread_pool;
+
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
 
 use eframe::{
     egui_wgpu::{
@@ -95,9 +93,9 @@ fn interaction(
     radius: f32,
     viscosity: f32,
 ) -> Vec<Particle> {
-    #[cfg(target_arch = "wasm32")]
-    let g_iter = group1.iter();
-    #[cfg(not(target_arch = "wasm32"))]
+    // #[cfg(target_arch = "wasm32")]
+    // let g_iter = group1.iter();
+    // #[cfg(not(target_arch = "wasm32"))]
     let g_iter = group1.par_iter();
 
     g_iter
@@ -303,7 +301,6 @@ impl App {
         wgpu_render_state
             .renderer
             .write()
-            // .paint_callback_resources
             .callback_resources
             .insert(RenderResources {
                 render_pipeline,

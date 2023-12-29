@@ -1,13 +1,13 @@
 [target.wasm32-unknown-unknown]
 rustflags = [
     "-C",
-    # "target-feature=+atomics,+bulk-memory,+mutable-globals,+simd128",
-    "target-feature=+simd128",
+    "target-feature=+atomics,+bulk-memory,+mutable-globals,+simd128",
+    # "target-feature=+simd128",
     "--cfg=web_sys_unstable_apis",
 ]
 
-# [unstable]
-# build-std = ["panic_abort", "std"]
+[unstable]
+build-std = ["panic_abort", "std"]
 
-# [build]
-# target = "aarch64-apple-darwin"
+[build]
+target = "aarch64-apple-darwin"
