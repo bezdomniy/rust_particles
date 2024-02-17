@@ -17,7 +17,7 @@ use instant::{Duration, Instant};
 use eframe::{
     egui_wgpu::{
         self,
-        wgpu::{self, Buffer, Device, Queue, RenderPass, RenderPipeline},
+        wgpu::{self, Buffer, Device, Queue, RenderPass, RenderPipeline}, ScreenDescriptor,
     },
     wgpu::util::DeviceExt,
 };
@@ -408,6 +408,7 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        _screen_descriptor: &ScreenDescriptor,
         _egui_encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {

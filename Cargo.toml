@@ -10,11 +10,11 @@ default = ["native"]
 native = ["glam/std"]
 
 [dependencies]
-egui = "0.25"
-# wgpu = { version = "0.18" }
-# wgpu = { version = "0.18", features = ["fragile-send-sync-non-atomic-wasm"] }
-wgpu = { version = "0.18", features = ["webgl"] }
-eframe = { version = "0.25", default-features = false, features = [
+egui = "0.26.2"
+# wgpu = { version = "0.19.1" }
+# wgpu = { version = "0.19.1", features = ["fragile-send-sync-non-atomic-wasm"] }
+wgpu = { version = "0.19.1", features = ["webgl"] }
+eframe = { version = "0.26.2", default-features = false, features = [
     "default_fonts",
     "wgpu",
 ] }
