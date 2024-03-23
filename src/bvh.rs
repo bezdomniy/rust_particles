@@ -126,6 +126,11 @@ impl Bvh {
 
         let split_method = SplitMethod::EqualCounts;
 
+        // for x in &particles[..] {
+        //     if x.pos.x.is_nan() {
+        //         println!("{:?}", x);
+        //     }
+        // }
         Bvh::recursive_build(
             &mut bounding_circles,
             particles,
@@ -153,6 +158,7 @@ impl Bvh {
         //     println!("{}, {}, {:?}", start, end, x);
         // }
         // println!("start end: {:?} {:?}", start, end);
+
         let centroid_bounds = particles[start..end]
             .iter()
             .fold(AABB::empty(), |acc, new| {
@@ -208,15 +214,19 @@ impl Bvh {
                 mid = (start + end) / 2;
                 // println!("{} {} {} {}", start, mid, end, particles.len());
                 // for x in &particles[start..end] {
-                //     println!("{:?}", x);
+                //     if x.pos.x.is_nan() {
+                //         println!("{:?}", x);
+                //     }
                 // }
                 particles[start..end].select_nth_unstable_by(mid - start, |a, b| {
                     a.bounds_centroid()[split_dimension]
                         .partial_cmp(&b.bounds_centroid()[split_dimension])
                         .unwrap()
                 });
-                // for x in &particles[start..end] {
-                //     println!("{:?}", x);
+                // for x in &particles[..] {
+                //     if x.pos.x.is_nan() {
+                //         println!("{:?}", x);
+                //     }
                 // }
             }
 
@@ -305,6 +315,11 @@ impl Bvh {
             bounding_circles.push(bounds);
 
             // println!("{} {} {}", start, mid, end);
+            for x in &particles[start..mid] {
+                if x.pos.x.is_nan() {
+                    println!("{:?} {} {}", x, start, end);
+                }
+            }
             Bvh::recursive_build(
                 bounding_circles,
                 particles,
@@ -313,6 +328,11 @@ impl Bvh {
                 mid,
                 split_method,
             );
+            for x in &particles[mid..end] {
+                if x.pos.x.is_nan() {
+                    println!("{:?} {} {}", x, start, end);
+                }
+            }
             let skip_ptr =
                 Bvh::recursive_build(bounding_circles, particles, radius, mid, end, split_method);
 
@@ -368,6 +388,12 @@ impl Bvh {
                 idx = current_node.skip_ptr_or_prim_idx1 as usize;
             }
         }
+        // if ret.len() > 0 {
+        //     println!("{}", ret.len());
+        // }
+        // for x in &ret[..] {
+        //     println!("{:?}", x);
+        // }
         return ret;
     }
 }

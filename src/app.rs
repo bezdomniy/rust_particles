@@ -1,7 +1,7 @@
 use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distributions::Uniform, thread_rng, Rng};
-use std::borrow::Cow;
+use std::{borrow::Cow, process::exit};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -115,33 +115,36 @@ impl Particle {
 
 // Interaction between 2 particle groups
 fn interaction(
-    group1: &[Particle],
-    group2: &[Particle],
+    particles: &mut Vec<Particle>,
     bvh: &Bvh,
+    group1_start: usize,
+    group1_end: usize,
+    group2_start: usize,
+    group2_end: usize,
     g: f32,
     radius: f32,
     viscosity: f32,
-) -> Vec<Particle> {
+) {
+    let group2 = &particles.clone()[group2_start as usize..group2_end];
+    let group1 = &mut particles[group1_start as usize..group1_end];
     #[cfg(target_arch = "wasm32")]
     let g_iter = group1.iter();
     #[cfg(not(target_arch = "wasm32"))]
-    let g_iter = group1.par_iter();
+    let g_iter = group1.par_iter_mut();
 
-    g_iter
-        .map(|p1| {
-            // let filtered_group2 = query(p1.pos, radius, group2);
-            let f = bvh
-                .intersect(p1, radius, group2)
-                .iter()
-                .filter(|p2| !std::ptr::eq(p1, *p2))
-                .fold(Vec2::new(0f32, 0f32), |accum, p2| {
-                    accum + p1.interact(p2, g, radius)
-                });
+    g_iter.for_each(|p1| {
+        // let filtered_group2 = query(p1.pos, radius, group2);
+        let f = bvh
+            .intersect(p1, radius, group2)
+            .iter()
+            // let f = group2
+            //     .iter()
+            // .filter(|p2| !std::ptr::eq(p1, *p2))
+            .fold(Vec2::new(0f32, 0f32), |accum, p2| {
+                accum + p1.interact(p2, g, radius)
+            });
 
-            if f.length() < f32::EPSILON {
-                return *p1;
-            }
-
+        if f.length() >= f32::EPSILON {
             // let mut vel = p1.vel;
             // let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
             let mut vel = (p1.vel * (1f32 - viscosity)) + (f * 0.00001f32);
@@ -161,13 +164,10 @@ fn interaction(
                 }
             }
 
-            Particle {
-                pos: p1.pos + vel,
-                vel,
-                cls: p1.cls,
-            }
-        })
-        .collect()
+            p1.pos = p1.pos + vel;
+            p1.vel = vel;
+        }
+    })
 }
 
 impl App {
@@ -392,26 +392,51 @@ impl App {
                 // );
 
                 // for x in &mut self.game_state.particle_data[group2_start as usize..group2_end] {
-                //     println!("{:?} {} {}", x, group2_start, group2_end);
+                //     if x.pos.x.is_nan() {
+                //         println!("{:?} {} {}", x, group2_start, group2_end);
+                //     }
                 // }
 
+                for (i, x) in self.game_state.particle_data[group1_start as usize..group1_end]
+                    .iter()
+                    .enumerate()
+                {
+                    if x.pos.x.is_nan() {
+                        println!("{} {:?}", i, x);
+                        exit(0);
+                    }
+                }
                 let bvh = Bvh::new(
                     // &mut self.game_state.particle_data,
                     &mut self.game_state.particle_data[group2_start as usize..group2_end],
                     self.game_state.r_slider.col(i)[j],
                 );
 
+                // for (i, x) in self.game_state.particle_data[group1_start as usize..group1_end]
+                //     .iter()
+                //     .enumerate()
+                // {
+                //     if x.pos.x.is_nan() {
+                //         println!("{} {:?}", i, x);
+                //         exit(0);
+                //     }
+                // }
+                // exit(0);
+
                 let new_particle_data = interaction(
-                    &self.game_state.particle_data[group1_start as usize..group1_end],
-                    &self.game_state.particle_data[group2_start as usize..group2_end],
+                    &mut self.game_state.particle_data,
                     &bvh,
+                    group1_start as usize,
+                    group1_end,
+                    group2_start as usize,
+                    group2_end,
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
                     0.5f32,
                 );
-                self.game_state
-                    .particle_data
-                    .splice(group1_start as usize..group1_end, new_particle_data);
+                // self.game_state
+                //     .particle_data
+                //     .splice(group1_start as usize..group1_end, new_particle_data);
             }
         }
     }
