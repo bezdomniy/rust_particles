@@ -17,7 +17,8 @@ use instant::{Duration, Instant};
 use eframe::{
     egui_wgpu::{
         self,
-        wgpu::{self, Buffer, Device, Queue, RenderPass, RenderPipeline}, ScreenDescriptor,
+        wgpu::{self, Buffer, Device, Queue, RenderPass, RenderPipeline},
+        ScreenDescriptor,
     },
     wgpu::util::DeviceExt,
 };
@@ -87,6 +88,25 @@ struct Particle {
     cls: u32,
 }
 
+impl Particle {
+    pub fn interact(self: &Particle, other: &Particle, g: f32) -> Vec2 {
+        let d = self.pos - other.pos;
+        let r = d.length();
+        return (g * d.normalize()) / r;
+    }
+}
+
+// fn query(point: Vec2, radius: f32, group: &[Particle]) -> Vec<&Particle> {
+//     group
+//         .iter()
+//         .filter(|x| {
+//             let d = point - x.pos;
+//             let r = d.length();
+//             r < radius && r > 0f32
+//         })
+//         .collect()
+// }
+
 // Interaction between 2 particle groups
 fn interaction(
     group1: &[Particle],
@@ -102,24 +122,13 @@ fn interaction(
 
     g_iter
         .map(|p1| {
-            let mut f = Vec2::new(0f32, 0f32);
-            group2.iter().for_each(|p2| {
-                // let d_sq = p1.pos.distance_squared(p2.pos);
-
-                // let force = if d_sq < radius * radius && d_sq > 0f32 {
-                //     1f32 / d_sq.sqrt()
-                // } else {
-                //     0f32
-                // };
-
-                // f += (p1.pos - p2.pos) * force;
-
-                let d = p1.pos - p2.pos;
-                let r = d.length();
-                if r < radius && r > 0f32 {
-                    f += (g * d.normalize()) / r;
-                }
-            });
+            // let filtered_group2 = query(p1.pos, radius, group2);
+            let f = group2
+                .iter()
+                .filter(|p2| !std::ptr::eq(p1, *p2) && (p2.pos - p1.pos).length() < radius)
+                .fold(Vec2::new(0f32, 0f32), |accum, p2| {
+                    accum + p1.interact(p2, g)
+                });
 
             if f.length() < f32::EPSILON {
                 return *p1;
@@ -128,10 +137,11 @@ fn interaction(
             // let mut vel = p1.vel;
             // let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
             let mut vel = (p1.vel * (1f32 - viscosity)) + (f * 0.00001f32);
+            vel = vel.clamp_length_max(MAX_VELOCITY);
 
-            if vel.length() > MAX_VELOCITY {
-                vel = vel.normalize() * MAX_VELOCITY;
-            }
+            // if vel.length() > MAX_VELOCITY {
+            //     vel = vel.normalize() * MAX_VELOCITY;
+            // }
 
             if BOUNDS_TOGGLE {
                 //not good enough! Need fixing
@@ -142,10 +152,9 @@ fn interaction(
                     vel.y *= -1f32;
                 }
             }
-            let pos = p1.pos + vel;
 
             Particle {
-                pos,
+                pos: p1.pos + vel,
                 vel,
                 cls: p1.cls,
             }
