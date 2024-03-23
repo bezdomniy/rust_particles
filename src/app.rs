@@ -356,6 +356,9 @@ impl App {
     }
 
     fn update(&mut self) {
+        // for x in &mut self.game_state.particle_data {
+        //     println!("{:?}", x);
+        // }
         for (i, group1_start) in self.game_state.particle_offsets.into_iter().enumerate() {
             if group1_start < 0 {
                 continue;
@@ -382,6 +385,15 @@ impl App {
                     .find(|&item| item > 0)
                     .unwrap_or(self.game_state.particle_data.len() as i32)
                     as usize;
+
+                // println!(
+                //     "{} {} {} {}",
+                //     group1_start, group1_end, group2_start, group2_end
+                // );
+
+                // for x in &mut self.game_state.particle_data[group2_start as usize..group2_end] {
+                //     println!("{:?} {} {}", x, group2_start, group2_end);
+                // }
 
                 let bvh = Bvh::new(
                     // &mut self.game_state.particle_data,

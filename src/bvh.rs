@@ -1,6 +1,9 @@
 use glam::Vec2;
 use itertools::partition;
-use std::f32::{consts::PI, INFINITY, NEG_INFINITY};
+use std::{
+    f32::{consts::PI, INFINITY, NEG_INFINITY},
+    process::exit,
+};
 
 use crate::app::Particle;
 
@@ -117,18 +120,18 @@ impl Bvh {
         Bvh(object_inner_nodes)
     }
 
-    fn build(primitives: &mut [Particle], radius: f32) -> Vec<NodeInner> {
+    fn build(particles: &mut [Particle], radius: f32) -> Vec<NodeInner> {
         let mut bounding_circles: Vec<NodeInner> =
-            Vec::with_capacity(primitives.len().next_power_of_two());
+            Vec::with_capacity(particles.len().next_power_of_two());
 
         let split_method = SplitMethod::EqualCounts;
 
         Bvh::recursive_build(
             &mut bounding_circles,
-            primitives,
+            particles,
             radius,
             0,
-            primitives.len(),
+            particles.len(),
             split_method,
         );
 
@@ -139,23 +142,24 @@ impl Bvh {
     // TODO: make this return the skip pointer so it can bubble up
     fn recursive_build(
         bounding_circles: &mut Vec<NodeInner>,
-        primitives: &mut [Particle],
+        particles: &mut [Particle],
         radius: f32,
         start: usize,
         end: usize,
         split_method: SplitMethod,
     ) -> u32 {
+        // println!("{} {}", start, end);
         // for x in &primitives[start..end] {
         //     println!("{}, {}, {:?}", start, end, x);
         // }
         // println!("start end: {:?} {:?}", start, end);
-        let centroid_bounds = primitives[start..end]
+        let centroid_bounds = particles[start..end]
             .iter()
             .fold(AABB::empty(), |acc, new| {
                 acc.add_point(&new.bounds_centroid())
             });
 
-        let mut bounds = primitives[start..end]
+        let mut bounds = particles[start..end]
             .iter()
             .fold(NodeInner::empty(), |acc, new| {
                 acc.merge(&new.bounds(radius))
@@ -191,7 +195,7 @@ impl Bvh {
                     + centroid_bounds.second[split_dimension])
                     / 2f32;
 
-                mid = partition(primitives[start..end].iter_mut(), |n| {
+                mid = partition(particles[start..end].iter_mut(), |n| {
                     n.bounds_centroid()[split_dimension] < pmid
                 }) + start;
 
@@ -202,18 +206,25 @@ impl Bvh {
 
             if fallthrough || matches!(split_method, SplitMethod::EqualCounts) {
                 mid = (start + end) / 2;
-                primitives[start..end].select_nth_unstable_by(mid - start, |a, b| {
+                // println!("{} {} {} {}", start, mid, end, particles.len());
+                // for x in &particles[start..end] {
+                //     println!("{:?}", x);
+                // }
+                particles[start..end].select_nth_unstable_by(mid - start, |a, b| {
                     a.bounds_centroid()[split_dimension]
                         .partial_cmp(&b.bounds_centroid()[split_dimension])
                         .unwrap()
                 });
+                // for x in &particles[start..end] {
+                //     println!("{:?}", x);
+                // }
             }
 
             if matches!(split_method, SplitMethod::Sah) {
                 // println!("{:?}", centroid_bounds);
                 if n_shapes <= 2 {
                     mid = (start + end) / 2;
-                    primitives[start..end].select_nth_unstable_by(mid - start, |a, b| {
+                    particles[start..end].select_nth_unstable_by(mid - start, |a, b| {
                         a.bounds_centroid()[split_dimension]
                             .partial_cmp(&b.bounds_centroid()[split_dimension])
                             .unwrap()
@@ -222,7 +233,7 @@ impl Bvh {
                     let n_buckets: usize = 12;
                     let mut buckets = vec![NodeInner::empty(); n_buckets];
 
-                    for triangle in primitives.iter().take(end).skip(start) {
+                    for triangle in particles.iter().take(end).skip(start) {
                         let mut b: usize = n_buckets
                             * centroid_bounds.offset(&triangle.bounds_centroid())[split_dimension]
                                 .round() as usize;
@@ -271,7 +282,7 @@ impl Bvh {
 
                     let leaf_cost = n_shapes as f32;
                     if n_shapes > MAX_SHAPES_IN_NODE || min_cost < leaf_cost {
-                        mid = partition(primitives[start..end].iter_mut(), |n| {
+                        mid = partition(particles[start..end].iter_mut(), |n| {
                             let mut b: usize = n_buckets
                                 * centroid_bounds.offset(&n.bounds_centroid())[split_dimension]
                                     .round() as usize;
@@ -293,16 +304,17 @@ impl Bvh {
             let curr_idx = bounding_circles.len();
             bounding_circles.push(bounds);
 
+            // println!("{} {} {}", start, mid, end);
             Bvh::recursive_build(
                 bounding_circles,
-                primitives,
+                particles,
                 radius,
                 start,
                 mid,
                 split_method,
             );
             let skip_ptr =
-                Bvh::recursive_build(bounding_circles, primitives, radius, mid, end, split_method);
+                Bvh::recursive_build(bounding_circles, particles, radius, mid, end, split_method);
 
             bounding_circles[curr_idx].skip_ptr_or_prim_idx1 = skip_ptr;
 
