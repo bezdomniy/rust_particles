@@ -23,6 +23,8 @@ use eframe::{
     wgpu::util::DeviceExt,
 };
 
+use crate::bvh::Bvh;
+
 const FRAMERATE: u32 = 30;
 const BOUNDS_TOGGLE: bool = true;
 const PARTICLE_SIZE: f32 = 2f32;
@@ -64,7 +66,7 @@ impl GameState {
                 );
 
             for _ in start..end {
-                self.particle_data.push(Particle {
+                let particle = Particle {
                     pos: Vec2::new(
                         thread_rng().gen_range(-1f32..=1f32),
                         thread_rng().gen_range(-1f32..=1f32),
@@ -74,7 +76,8 @@ impl GameState {
                         thread_rng().gen_range(-0.001f32..=0.001f32),
                     ),
                     cls: i as u32,
-                })
+                };
+                self.particle_data.push(particle);
             }
         }
     }
@@ -82,8 +85,8 @@ impl GameState {
 
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Particle {
-    pos: Vec2,
+pub struct Particle {
+    pub pos: Vec2,
     vel: Vec2,
     cls: u32,
 }
@@ -114,6 +117,7 @@ impl Particle {
 fn interaction(
     group1: &[Particle],
     group2: &[Particle],
+    bvh: &Bvh,
     g: f32,
     radius: f32,
     viscosity: f32,
@@ -126,7 +130,8 @@ fn interaction(
     g_iter
         .map(|p1| {
             // let filtered_group2 = query(p1.pos, radius, group2);
-            let f = group2
+            let f = bvh
+                .intersect(p1, radius, group2)
                 .iter()
                 .filter(|p2| !std::ptr::eq(p1, *p2))
                 .fold(Vec2::new(0f32, 0f32), |accum, p2| {
@@ -378,9 +383,16 @@ impl App {
                     .unwrap_or(self.game_state.particle_data.len() as i32)
                     as usize;
 
+                let bvh = Bvh::new(
+                    // &mut self.game_state.particle_data,
+                    &mut self.game_state.particle_data[group2_start as usize..group2_end],
+                    self.game_state.r_slider.col(i)[j],
+                );
+
                 let new_particle_data = interaction(
                     &self.game_state.particle_data[group1_start as usize..group1_end],
                     &self.game_state.particle_data[group2_start as usize..group2_end],
+                    &bvh,
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
                     0.5f32,
