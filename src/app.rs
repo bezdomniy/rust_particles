@@ -89,43 +89,33 @@ struct Particle {
 }
 
 // Interaction between 2 particle groups
-fn interaction(
-    group1: &[Particle],
-    group2: &[Particle],
-    g: f32,
-    radius: f32,
-    viscosity: f32,
-) -> Vec<Particle> {
+fn interaction(group1: &mut [Particle], group2: &[Particle], g: f32, radius: f32, viscosity: f32) {
     #[cfg(target_arch = "wasm32")]
     let g_iter = group1.iter();
     #[cfg(not(target_arch = "wasm32"))]
-    let g_iter = group1.par_iter();
+    let g_iter = group1.par_iter_mut();
 
-    g_iter
-        .map(|p1| {
-            let mut f = Vec2::new(0f32, 0f32);
-            group2.iter().for_each(|p2| {
-                // let d_sq = p1.pos.distance_squared(p2.pos);
+    g_iter.for_each(|p1| {
+        let mut f = Vec2::new(0f32, 0f32);
+        group2.iter().for_each(|p2| {
+            // let d_sq = p1.pos.distance_squared(p2.pos);
 
-                // let force = if d_sq < radius * radius && d_sq > 0f32 {
-                //     1f32 / d_sq.sqrt()
-                // } else {
-                //     0f32
-                // };
+            // let force = if d_sq < radius * radius && d_sq > 0f32 {
+            //     1f32 / d_sq.sqrt()
+            // } else {
+            //     0f32
+            // };
 
-                // f += (p1.pos - p2.pos) * force;
+            // f += (p1.pos - p2.pos) * force;
 
-                let d = p1.pos - p2.pos;
-                let r = d.length();
-                if r < radius && r > 0f32 {
-                    f += (g * d.normalize()) / r;
-                }
-            });
-
-            if f.length() < f32::EPSILON {
-                return *p1;
+            let d = p1.pos - p2.pos;
+            let r = d.length();
+            if r < radius && r > 0f32 {
+                f += (g * d.normalize()) / r;
             }
+        });
 
+        if f.length() >= f32::EPSILON {
             // let mut vel = p1.vel;
             // let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
             let mut vel = (p1.vel * (1f32 - viscosity)) + (f * 0.00001f32);
@@ -143,15 +133,10 @@ fn interaction(
                     vel.y *= -1f32;
                 }
             }
-            let pos = p1.pos + vel;
-
-            Particle {
-                pos,
-                vel,
-                cls: p1.cls,
-            }
-        })
-        .collect()
+            p1.pos += vel;
+            p1.vel = vel;
+        }
+    })
 }
 
 impl App {
@@ -367,16 +352,15 @@ impl App {
                     .unwrap_or(self.game_state.particle_data.len() as i32)
                     as usize;
 
-                let new_particle_data = interaction(
-                    &self.game_state.particle_data[group1_start as usize..group1_end],
-                    &self.game_state.particle_data[group2_start as usize..group2_end],
+                let particles_data_copy = self.game_state.particle_data.clone();
+
+                interaction(
+                    &mut self.game_state.particle_data[group1_start as usize..group1_end],
+                    &particles_data_copy[group2_start as usize..group2_end],
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
                     0.5f32,
                 );
-                self.game_state
-                    .particle_data
-                    .splice(group1_start as usize..group1_end, new_particle_data);
             }
         }
     }
