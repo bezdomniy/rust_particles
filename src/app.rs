@@ -89,7 +89,10 @@ struct Particle {
 }
 
 impl Particle {
-    pub fn interact(self: &Particle, other: &Particle, g: f32) -> Vec2 {
+    pub fn interact(self: &Particle, other: &Particle, g: f32, radius: f32) -> Vec2 {
+        if (self.pos - other.pos).length() > radius {
+            return Vec2::new(0f32, 0f32);
+        }
         let d = self.pos - other.pos;
         let r = d.length();
         return (g * d.normalize()) / r;
@@ -125,9 +128,9 @@ fn interaction(
             // let filtered_group2 = query(p1.pos, radius, group2);
             let f = group2
                 .iter()
-                .filter(|p2| !std::ptr::eq(p1, *p2) && (p2.pos - p1.pos).length() < radius)
+                .filter(|p2| !std::ptr::eq(p1, *p2))
                 .fold(Vec2::new(0f32, 0f32), |accum, p2| {
-                    accum + p1.interact(p2, g)
+                    accum + p1.interact(p2, g, radius)
                 });
 
             if f.length() < f32::EPSILON {
