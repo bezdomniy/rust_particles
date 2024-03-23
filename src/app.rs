@@ -17,7 +17,8 @@ use instant::{Duration, Instant};
 use eframe::{
     egui_wgpu::{
         self,
-        wgpu::{self, Buffer, Device, Queue, RenderPass, RenderPipeline}, ScreenDescriptor,
+        wgpu::{self, Buffer, Device, Queue, RenderPass, RenderPipeline},
+        ScreenDescriptor,
     },
     wgpu::util::DeviceExt,
 };
@@ -73,7 +74,7 @@ impl GameState {
                         thread_rng().gen_range(-0.001f32..=0.001f32),
                     ),
                     cls: i as u32,
-                })
+                });
             }
         }
     }
