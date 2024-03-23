@@ -1,7 +1,7 @@
 use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distributions::Uniform, thread_rng, Rng};
-use std::{borrow::Cow, process::exit};
+use std::borrow::Cow;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -92,10 +92,7 @@ pub struct Particle {
 }
 
 impl Particle {
-    pub fn interact(self: &Particle, other: &Particle, g: f32, radius: f32) -> Vec2 {
-        // if (self.pos - other.pos).length() > radius {
-        //     return Vec2::new(0f32, 0f32);
-        // }
+    pub fn interact(self: &Particle, other: &Particle, g: f32) -> Vec2 {
         if std::ptr::eq(self, other) {
             return Vec2::new(0f32, 0f32);
         }
@@ -131,7 +128,7 @@ fn interaction(
             .iter()
             // .filter(|p2| !std::ptr::eq(p1, *p2))
             .fold(Vec2::new(0f32, 0f32), |accum, p2| {
-                accum + p1.interact(p2, g, radius)
+                accum + p1.interact(p2, g)
             });
 
         if f.length() >= f32::EPSILON {
@@ -174,7 +171,7 @@ impl App {
             .unwrap();
 
         let r_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(0.01f32, 0.9f32)))
+            .map(|_| rng.sample(Uniform::new(0.01f32, 0.2f32)))
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap();
@@ -183,7 +180,7 @@ impl App {
         let num_particles = UVec4::new(1000, 1000, 1000, 1000);
 
         #[cfg(not(target_arch = "wasm32"))]
-        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
+        let num_particles = UVec4::new(10000, 10000, 10000, 10000);
 
         let mut game_state = GameState {
             particle_data: Vec::with_capacity(
@@ -346,9 +343,6 @@ impl App {
     }
 
     fn update(&mut self) {
-        // for x in &mut self.game_state.particle_data {
-        //     println!("{:?}", x);
-        // }
         for (i, group1_start) in self.game_state.particle_offsets.into_iter().enumerate() {
             if group1_start < 0 {
                 continue;
@@ -376,42 +370,11 @@ impl App {
                     .unwrap_or(self.game_state.particle_data.len() as i32)
                     as usize;
 
-                // println!(
-                //     "{} {} {} {}",
-                //     group1_start, group1_end, group2_start, group2_end
-                // );
-
-                // for x in &mut self.game_state.particle_data[group2_start as usize..group2_end] {
-                //     if x.pos.x.is_nan() {
-                //         println!("{:?} {} {}", x, group2_start, group2_end);
-                //     }
-                // }
-
-                for (i, x) in self.game_state.particle_data[group1_start as usize..group1_end]
-                    .iter()
-                    .enumerate()
-                {
-                    if x.pos.x.is_nan() {
-                        println!("{} {:?}", i, x);
-                        exit(0);
-                    }
-                }
                 let bvh = Bvh::new(
                     // &mut self.game_state.particle_data,
                     &mut self.game_state.particle_data[group2_start as usize..group2_end],
                     self.game_state.r_slider.col(i)[j],
                 );
-
-                // for (i, x) in self.game_state.particle_data[group1_start as usize..group1_end]
-                //     .iter()
-                //     .enumerate()
-                // {
-                //     if x.pos.x.is_nan() {
-                //         println!("{} {:?}", i, x);
-                //         exit(0);
-                //     }
-                // }
-                // exit(0);
 
                 interaction(
                     &mut self.game_state.particle_data,

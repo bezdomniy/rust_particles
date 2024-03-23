@@ -56,24 +56,35 @@ impl NodeInner {
     }
 
     pub fn merge(&self, other: &NodeInner) -> Self {
-        let d = other.centre.distance(self.centre);
+        if self.centre.x < INFINITY {
+            let d = other.centre.distance(self.centre);
 
-        if d + self.radius <= other.radius {
-            return *other;
+            if d + self.radius <= other.radius {
+                return *other;
+            }
+            if d + other.radius <= self.radius {
+                return *self;
+            }
+
+            let new_centre = (self.centre + other.centre) / 2f32;
+            let new_radius = f32::max(self.radius, other.radius) + d / 2f32;
+
+            // println!("b: {:?}", new_radius);
+
+            return NodeInner::new(
+                new_centre,
+                new_radius,
+                other.skip_ptr_or_prim_idx1,
+                other.prim_idx2,
+            );
+        } else {
+            return NodeInner::new(
+                other.centre,
+                other.radius,
+                other.skip_ptr_or_prim_idx1,
+                other.prim_idx2,
+            );
         }
-        if d + other.radius <= self.radius {
-            return *self;
-        }
-
-        let new_centre = (self.centre + other.centre) / 2f32;
-        let new_radius = f32::max(self.radius, other.radius) + d / 2f32;
-
-        NodeInner::new(
-            new_centre,
-            new_radius,
-            other.skip_ptr_or_prim_idx1,
-            other.prim_idx2,
-        )
     }
 
     pub fn surface_area(&self) -> f32 {
@@ -122,13 +133,8 @@ impl Bvh {
         let mut bounding_circles: Vec<NodeInner> =
             Vec::with_capacity(particles.len().next_power_of_two());
 
-        let split_method = SplitMethod::Sah;
+        let split_method = SplitMethod::EqualCounts;
 
-        // for x in &particles[..] {
-        //     if x.pos.x.is_nan() {
-        //         println!("{:?}", x);
-        //     }
-        // }
         Bvh::recursive_build(
             &mut bounding_circles,
             particles,
@@ -169,7 +175,7 @@ impl Bvh {
                 acc.merge(&new.bounds(radius))
             });
 
-        // println!("cb: {:?}", centroid_bounds);
+        // println!("b: {:?}", bounds);
 
         let diagonal = centroid_bounds.diagonal();
 
@@ -312,12 +318,6 @@ impl Bvh {
             let curr_idx = bounding_circles.len();
             bounding_circles.push(bounds);
 
-            // println!("{} {} {}", start, mid, end);
-            for x in &particles[start..mid] {
-                if x.pos.x.is_nan() {
-                    println!("{:?} {} {}", x, start, end);
-                }
-            }
             Bvh::recursive_build(
                 bounding_circles,
                 particles,
@@ -326,11 +326,6 @@ impl Bvh {
                 mid,
                 split_method,
             );
-            for x in &particles[mid..end] {
-                if x.pos.x.is_nan() {
-                    println!("{:?} {} {}", x, start, end);
-                }
-            }
             let skip_ptr =
                 Bvh::recursive_build(bounding_circles, particles, radius, mid, end, split_method);
 
@@ -361,6 +356,7 @@ impl Bvh {
             let current_node = &self.0[idx];
 
             let leaf_node: bool = current_node.prim_idx2 > 0u32;
+            // println!("{:?}", current_node);
 
             if point_in_circle(current_node.centre, current_node.radius, particle.pos) {
                 if leaf_node {
