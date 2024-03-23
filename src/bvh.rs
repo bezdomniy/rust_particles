@@ -353,7 +353,7 @@ impl Bvh {
         radius: f32,
         particles: &[Particle],
     ) -> Vec<Particle> {
-        let mut ret = Vec::with_capacity(3000);
+        let mut ret = Vec::with_capacity(1000);
 
         let mut idx = 0;
         loop {
@@ -361,7 +361,7 @@ impl Bvh {
                 break;
             };
 
-            let current_node: NodeInner = self.0[idx];
+            let current_node = &self.0[idx];
 
             let leaf_node: bool = current_node.prim_idx2 > 0u32;
 
@@ -375,14 +375,6 @@ impl Bvh {
                         if point_in_circle(particles[prim_idx as usize].pos, radius, particle.pos) {
                             ret.push(particles[prim_idx as usize]);
                         }
-
-                        // let next_intersection = intersectTriangle(ray, primIdx, ret, object_id);
-
-                        // if ((next_intersection.closestT < inIntersection.closestT)
-                        //     && (next_intersection.closestT > EPSILON))
-                        // {
-                        //     ret = next_intersection;
-                        // }
                     }
                 }
                 idx += 1;
