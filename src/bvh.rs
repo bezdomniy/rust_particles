@@ -133,7 +133,7 @@ impl Bvh {
         let mut bounding_circles: Vec<NodeInner> =
             Vec::with_capacity(particles.len().next_power_of_two());
 
-        let split_method = SplitMethod::EqualCounts;
+        let split_method = SplitMethod::Sah;
 
         Bvh::recursive_build(
             &mut bounding_circles,

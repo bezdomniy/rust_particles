@@ -1,7 +1,7 @@
 use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distributions::Uniform, thread_rng, Rng};
-use std::borrow::Cow;
+use std::{borrow::Cow, f32::EPSILON};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -145,9 +145,11 @@ fn interaction(
                 //not good enough! Need fixing
                 if (p1.pos.x >= 1f32) || (p1.pos.x <= -1f32) {
                     vel.x *= -1f32;
+                    p1.pos.x = (1f32 - EPSILON) * p1.pos.x.signum();
                 }
                 if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
                     vel.y *= -1f32;
+                    p1.pos.y = 1f32 * p1.pos.y.signum();
                 }
             }
 
@@ -165,13 +167,13 @@ impl App {
         let mut rng = rand::thread_rng();
 
         let power_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(-1f32, 1f32)))
+            .map(|_| rng.sample(Uniform::new(-0.5f32, 0.5f32)))
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap();
 
         let r_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(0.01f32, 0.2f32)))
+            .map(|_| rng.sample(Uniform::new(0.01f32, 0.3f32)))
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap();
