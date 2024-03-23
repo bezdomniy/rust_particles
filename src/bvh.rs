@@ -1,9 +1,6 @@
 use glam::Vec2;
 use itertools::partition;
-use std::{
-    f32::{consts::PI, INFINITY, NEG_INFINITY},
-    process::exit,
-};
+use std::f32::{consts::PI, INFINITY, NEG_INFINITY};
 
 use crate::app::Particle;
 
@@ -125,7 +122,7 @@ impl Bvh {
         let mut bounding_circles: Vec<NodeInner> =
             Vec::with_capacity(particles.len().next_power_of_two());
 
-        let split_method = SplitMethod::EqualCounts;
+        let split_method = SplitMethod::Sah;
 
         // for x in &particles[..] {
         //     if x.pos.x.is_nan() {

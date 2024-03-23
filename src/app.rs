@@ -93,9 +93,9 @@ pub struct Particle {
 
 impl Particle {
     pub fn interact(self: &Particle, other: &Particle, g: f32, radius: f32) -> Vec2 {
-        if (self.pos - other.pos).length() > radius {
-            return Vec2::new(0f32, 0f32);
-        }
+        // if (self.pos - other.pos).length() > radius {
+        //     return Vec2::new(0f32, 0f32);
+        // }
         if std::ptr::eq(self, other) {
             return Vec2::new(0f32, 0f32);
         }
@@ -154,7 +154,7 @@ fn interaction(
                 }
             }
 
-            p1.pos = p1.pos + vel;
+            p1.pos += vel;
             p1.vel = vel;
         }
     })
@@ -413,7 +413,7 @@ impl App {
                 // }
                 // exit(0);
 
-                let new_particle_data = interaction(
+                interaction(
                     &mut self.game_state.particle_data,
                     &bvh,
                     group1_start as usize,
@@ -424,9 +424,6 @@ impl App {
                     self.game_state.r_slider.col(i)[j],
                     0.5f32,
                 );
-                // self.game_state
-                //     .particle_data
-                //     .splice(group1_start as usize..group1_end, new_particle_data);
             }
         }
     }
