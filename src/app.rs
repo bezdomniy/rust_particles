@@ -96,22 +96,14 @@ impl Particle {
         if (self.pos - other.pos).length() > radius {
             return Vec2::new(0f32, 0f32);
         }
+        if std::ptr::eq(self, other) {
+            return Vec2::new(0f32, 0f32);
+        }
         let d = self.pos - other.pos;
         let r = d.length();
         return (g * d.normalize()) / r;
     }
 }
-
-// fn query(point: Vec2, radius: f32, group: &[Particle]) -> Vec<&Particle> {
-//     group
-//         .iter()
-//         .filter(|x| {
-//             let d = point - x.pos;
-//             let r = d.length();
-//             r < radius && r > 0f32
-//         })
-//         .collect()
-// }
 
 // Interaction between 2 particle groups
 fn interaction(
@@ -133,12 +125,10 @@ fn interaction(
     let g_iter = group1.par_iter_mut();
 
     g_iter.for_each(|p1| {
-        // let filtered_group2 = query(p1.pos, radius, group2);
         let f = bvh
             .intersect(p1, radius, group2)
-            .iter()
             // let f = group2
-            //     .iter()
+            .iter()
             // .filter(|p2| !std::ptr::eq(p1, *p2))
             .fold(Vec2::new(0f32, 0f32), |accum, p2| {
                 accum + p1.interact(p2, g, radius)

@@ -107,6 +107,7 @@ impl Bvh {
     }
 
     pub fn new(particles: &mut [Particle], radius: f32) -> Self {
+        // return Bvh::empty()
         let object_inner_nodes = Bvh::build(particles, radius);
 
         // object_leaf_nodes.push(triangles);
@@ -352,7 +353,7 @@ impl Bvh {
         radius: f32,
         particles: &[Particle],
     ) -> Vec<Particle> {
-        let mut ret = vec![];
+        let mut ret = Vec::with_capacity(3000);
 
         let mut idx = 0;
         loop {
@@ -366,10 +367,13 @@ impl Bvh {
 
             if point_in_circle(current_node.centre, current_node.radius, particle.pos) {
                 if leaf_node {
+                    // println!(
+                    //     "{} {}",
+                    //     current_node.skip_ptr_or_prim_idx1, current_node.prim_idx2
+                    // );
                     for prim_idx in (current_node.skip_ptr_or_prim_idx1)..(current_node.prim_idx2) {
-                        //TODO pass radius
                         if point_in_circle(particles[prim_idx as usize].pos, radius, particle.pos) {
-                            ret.push(particle.clone());
+                            ret.push(particles[prim_idx as usize]);
                         }
 
                         // let next_intersection = intersectTriangle(ray, primIdx, ret, object_id);
@@ -394,6 +398,7 @@ impl Bvh {
         // for x in &ret[..] {
         //     println!("{:?}", x);
         // }
+        // return particles.to_vec();
         return ret;
     }
 }
