@@ -1,7 +1,10 @@
-use egui::Color32;
+use egui::{Color32, Slider};
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distributions::Uniform, thread_rng, Rng};
-use std::{borrow::Cow, f32::EPSILON};
+use std::{
+    borrow::{BorrowMut, Cow},
+    f32::EPSILON,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -117,7 +120,7 @@ fn interaction(
     let group2 = &particles.clone()[group2_start as usize..group2_end];
     let group1 = &mut particles[group1_start as usize..group1_end];
     #[cfg(target_arch = "wasm32")]
-    let g_iter = group1.iter();
+    let g_iter = group1.iter_mut();
     #[cfg(not(target_arch = "wasm32"))]
     let g_iter = group1.par_iter_mut();
 
@@ -179,7 +182,7 @@ impl App {
             .unwrap();
 
         #[cfg(target_arch = "wasm32")]
-        let num_particles = UVec4::new(1000, 1000, 1000, 1000);
+        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
 
         #[cfg(not(target_arch = "wasm32"))]
         let num_particles = UVec4::new(10000, 10000, 10000, 10000);
@@ -397,6 +400,132 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.horizontal_top(|ui| {
+                // egui::Grid::new("power_slider").show(ui, |ui| {
+                //     ui.label(self.game_state.power_slider.x_axis.x.to_string());
+                //     ui.label(self.game_state.power_slider.x_axis.y.to_string());
+                //     ui.label(self.game_state.power_slider.x_axis.z.to_string());
+                //     ui.label(self.game_state.power_slider.x_axis.w.to_string());
+                //     ui.end_row();
+
+                //     ui.label(self.game_state.power_slider.y_axis.x.to_string());
+                //     ui.label(self.game_state.power_slider.y_axis.y.to_string());
+                //     ui.label(self.game_state.power_slider.y_axis.z.to_string());
+                //     ui.label(self.game_state.power_slider.y_axis.w.to_string());
+                //     ui.end_row();
+
+                //     ui.label(self.game_state.power_slider.z_axis.x.to_string());
+                //     ui.label(self.game_state.power_slider.z_axis.y.to_string());
+                //     ui.label(self.game_state.power_slider.z_axis.z.to_string());
+                //     ui.label(self.game_state.power_slider.z_axis.w.to_string());
+                //     ui.end_row();
+
+                //     ui.label(self.game_state.power_slider.w_axis.x.to_string());
+                //     ui.label(self.game_state.power_slider.w_axis.y.to_string());
+                //     ui.label(self.game_state.power_slider.w_axis.z.to_string());
+                //     ui.label(self.game_state.power_slider.w_axis.w.to_string());
+                //     ui.end_row();
+                // });
+                egui::Grid::new("r_slider").show(ui, |ui| {
+                    // self.game_state
+                    //     .r_slider
+                    //     .to_cols_array_2d()
+                    //     .iter_mut()
+                    //     .for_each(|row| {
+                    //         row.iter_mut().for_each(|val| {
+                    //             ui.add(egui::Slider::new(val, 0f32..=1f32));
+                    //         });
+                    //         ui.end_row();
+                    //     });
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.x_axis.x,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.x_axis.y,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.x_axis.z,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.x_axis.w,
+                        0f32..=1f32,
+                    ));
+                    ui.end_row();
+
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.y_axis.x,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.y_axis.y,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.y_axis.z,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.y_axis.w,
+                        0f32..=1f32,
+                    ));
+                    ui.end_row();
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.z_axis.x,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.z_axis.y,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.z_axis.z,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.z_axis.w,
+                        0f32..=1f32,
+                    ));
+                    ui.end_row();
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.w_axis.x,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.w_axis.y,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.w_axis.z,
+                        0f32..=1f32,
+                    ));
+                    ui.add(egui::Slider::new(
+                        &mut self.game_state.r_slider.w_axis.w,
+                        0f32..=1f32,
+                    ));
+                    ui.end_row();
+                    // ui.label(self.game_state.r_slider.y_axis.x.to_string());
+                    // ui.label(self.game_state.r_slider.y_axis.y.to_string());
+                    // ui.label(self.game_state.r_slider.y_axis.z.to_string());
+                    // ui.label(self.game_state.r_slider.y_axis.w.to_string());
+                    // ui.end_row();
+
+                    // ui.label(self.game_state.r_slider.z_axis.x.to_string());
+                    // ui.label(self.game_state.r_slider.z_axis.y.to_string());
+                    // ui.label(self.game_state.r_slider.z_axis.z.to_string());
+                    // ui.label(self.game_state.r_slider.z_axis.w.to_string());
+                    // ui.end_row();
+
+                    // ui.label(self.game_state.r_slider.w_axis.x.to_string());
+                    // ui.label(self.game_state.r_slider.w_axis.y.to_string());
+                    // ui.label(self.game_state.r_slider.w_axis.z.to_string());
+                    // ui.label(self.game_state.r_slider.w_axis.w.to_string());
+                    // ui.end_row();
+                });
+            });
+
             egui::Frame::canvas(ui.style())
                 .fill(Color32::BLACK)
                 .show(ui, |ui| {
