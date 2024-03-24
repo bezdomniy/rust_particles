@@ -10,11 +10,8 @@ static MAX_SHAPES_IN_NODE: usize = 4;
 pub struct NodeInner {
     pub centre: Vec2,
     pub radius: f32,
-    _padding0: u32,
     pub skip_ptr_or_prim_idx1: u32,
     pub prim_idx2: u32,
-    _padding1: u32,
-    _padding2: u32,
 }
 
 #[derive(Debug, Default, Copy, Clone)]
@@ -35,11 +32,8 @@ impl NodeInner {
         NodeInner {
             centre: centre,
             radius: radius,
-            _padding0: 0u32,
             skip_ptr_or_prim_idx1,
             prim_idx2,
-            _padding1: 0u32,
-            _padding2: 0u32,
         }
     }
 
@@ -47,11 +41,8 @@ impl NodeInner {
         NodeInner {
             centre: Vec2::new(f32::INFINITY, f32::INFINITY),
             radius: 0f32,
-            _padding0: 0u32,
             skip_ptr_or_prim_idx1: 0u32,
             prim_idx2: 0u32,
-            _padding1: 0u32,
-            _padding2: 0u32,
         }
     }
 
