@@ -1,10 +1,7 @@
-use egui::{Color32, Slider};
+use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distributions::Uniform, thread_rng, Rng};
-use std::{
-    borrow::{BorrowMut, Cow},
-    f32::EPSILON,
-};
+use std::{borrow::Cow, f32::EPSILON};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
