@@ -66,15 +66,39 @@ impl GameState {
                 );
 
             for _ in start..end {
+                let random_pos = match i {
+                    0 => Vec2::new(
+                        thread_rng().gen_range(-1f32..=0f32),
+                        thread_rng().gen_range(0f32..=1f32),
+                    ),
+                    1 => Vec2::new(
+                        thread_rng().gen_range(0f32..=1f32),
+                        thread_rng().gen_range(0f32..=1f32),
+                    ),
+                    2 => Vec2::new(
+                        thread_rng().gen_range(0f32..=1f32),
+                        thread_rng().gen_range(-1f32..=0f32),
+                    ),
+                    3 => Vec2::new(
+                        thread_rng().gen_range(-1f32..=0f32),
+                        thread_rng().gen_range(-1f32..=0f32),
+                    ),
+                    _ => Vec2::new(
+                        thread_rng().gen_range(-1f32..=1f32),
+                        thread_rng().gen_range(-1f32..=1f32),
+                    ),
+                };
                 let particle = Particle {
-                    pos: Vec2::new(
-                        thread_rng().gen_range(-1f32..=1f32),
-                        thread_rng().gen_range(-1f32..=1f32),
-                    ),
+                    // pos: Vec2::new(
+                    //     thread_rng().gen_range(-1f32..=1f32),
+                    //     thread_rng().gen_range(-1f32..=1f32),
+                    // ),
+                    pos: random_pos,
                     vel: Vec2::new(
-                        thread_rng().gen_range(-0.001f32..=0.001f32),
-                        thread_rng().gen_range(-0.001f32..=0.001f32),
+                        thread_rng().gen_range(-0.01f32..=0.01f32),
+                        thread_rng().gen_range(-0.01f32..=0.01f32),
                     ),
+                    // vel: Vec2::new(0f32, 0f32),
                     cls: i as u32,
                 };
                 self.particle_data.push(particle);
@@ -131,31 +155,29 @@ fn interaction(
                 accum + p1.interact(p2, g)
             });
 
+        let mut vel = p1.vel * (1f32 - viscosity);
+
         if f.length() >= f32::EPSILON {
             // let mut vel = p1.vel;
             // let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
-            let mut vel = (p1.vel * (1f32 - viscosity)) + (f * 0.00001f32);
-            vel = vel.clamp_length_max(MAX_VELOCITY);
-
-            // if vel.length() > MAX_VELOCITY {
-            //     vel = vel.normalize() * MAX_VELOCITY;
-            // }
-
-            if BOUNDS_TOGGLE {
-                //not good enough! Need fixing
-                if (p1.pos.x >= 1f32) || (p1.pos.x <= -1f32) {
-                    vel.x *= -1f32;
-                    p1.pos.x = (1f32 - EPSILON) * p1.pos.x.signum();
-                }
-                if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
-                    vel.y *= -1f32;
-                    p1.pos.y = 1f32 * p1.pos.y.signum();
-                }
-            }
-
-            p1.pos += vel;
-            p1.vel = vel;
+            vel += f * 0.00001f32;
         }
+        vel = vel.clamp_length_max(MAX_VELOCITY);
+
+        if BOUNDS_TOGGLE {
+            //not good enough! Need fixing
+            if (p1.pos.x >= 1f32) || (p1.pos.x <= -1f32) {
+                vel.x *= -1f32;
+                p1.pos.x = (1f32 - EPSILON) * p1.pos.x.signum();
+            }
+            if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
+                vel.y *= -1f32;
+                p1.pos.y = 1f32 * p1.pos.y.signum();
+            }
+        }
+
+        p1.pos += vel;
+        p1.vel = vel;
     })
 }
 
@@ -166,8 +188,15 @@ impl App {
 
         let mut rng = rand::thread_rng();
 
+        // let power_vals: [f32; 16] = (0..16)
+        //     .map(|_| rng.sample(Uniform::new(-0.5f32, 0.5f32)))
+        //     .collect::<Vec<f32>>()
+        //     .try_into()
+        //     .unwrap();
+
         let power_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(-0.5f32, 0.5f32)))
+            .map(|_| rng.sample(Uniform::new(-1f32, 1f32)))
+            // .map(|_| 0f32)
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap();
@@ -182,7 +211,8 @@ impl App {
         let num_particles = UVec4::new(3000, 3000, 3000, 3000);
 
         #[cfg(not(target_arch = "wasm32"))]
-        let num_particles = UVec4::new(10000, 10000, 10000, 10000);
+        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
+        // let num_particles = UVec4::new(10000, 10000, 10000, 10000);
 
         let mut game_state = GameState {
             particle_data: Vec::with_capacity(
@@ -387,7 +417,7 @@ impl App {
                     group2_end,
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
-                    0.5f32,
+                    0.01f32,
                 );
             }
         }
@@ -398,110 +428,178 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal_top(|ui| {
-                // egui::Grid::new("power_slider").show(ui, |ui| {
-                //     ui.label(self.game_state.power_slider.x_axis.x.to_string());
-                //     ui.label(self.game_state.power_slider.x_axis.y.to_string());
-                //     ui.label(self.game_state.power_slider.x_axis.z.to_string());
-                //     ui.label(self.game_state.power_slider.x_axis.w.to_string());
-                //     ui.end_row();
+                egui::Grid::new("power_slider").show(ui, |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.x_axis.x)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.x_axis.y)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.x_axis.z)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.x_axis.w)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.end_row();
 
-                //     ui.label(self.game_state.power_slider.y_axis.x.to_string());
-                //     ui.label(self.game_state.power_slider.y_axis.y.to_string());
-                //     ui.label(self.game_state.power_slider.y_axis.z.to_string());
-                //     ui.label(self.game_state.power_slider.y_axis.w.to_string());
-                //     ui.end_row();
-
-                //     ui.label(self.game_state.power_slider.z_axis.x.to_string());
-                //     ui.label(self.game_state.power_slider.z_axis.y.to_string());
-                //     ui.label(self.game_state.power_slider.z_axis.z.to_string());
-                //     ui.label(self.game_state.power_slider.z_axis.w.to_string());
-                //     ui.end_row();
-
-                //     ui.label(self.game_state.power_slider.w_axis.x.to_string());
-                //     ui.label(self.game_state.power_slider.w_axis.y.to_string());
-                //     ui.label(self.game_state.power_slider.w_axis.z.to_string());
-                //     ui.label(self.game_state.power_slider.w_axis.w.to_string());
-                //     ui.end_row();
-                // });
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.y_axis.x)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.y_axis.y)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.y_axis.z)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.y_axis.w)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.end_row();
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.z_axis.x)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.z_axis.y)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.z_axis.z)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.z_axis.w)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.end_row();
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.w_axis.x)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.w_axis.y)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.w_axis.z)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.power_slider.w_axis.w)
+                            .clamp_range(-1f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.end_row();
+                });
                 egui::Grid::new("r_slider").show(ui, |ui| {
-                    // self.game_state
-                    //     .r_slider
-                    //     .to_cols_array_2d()
-                    //     .iter_mut()
-                    //     .for_each(|row| {
-                    //         row.iter_mut().for_each(|val| {
-                    //             ui.add(egui::Slider::new(val, 0f32..=1f32));
-                    //         });
-                    //         ui.end_row();
-                    //     });
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.x_axis.x,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.x_axis.y,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.x_axis.z,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.x_axis.w,
-                        0f32..=1f32,
-                    ));
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.x_axis.x)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.x_axis.y)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.x_axis.z)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.x_axis.w)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
                     ui.end_row();
 
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.y_axis.x,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.y_axis.y,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.y_axis.z,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.y_axis.w,
-                        0f32..=1f32,
-                    ));
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.y_axis.x)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.y_axis.y)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.y_axis.z)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.y_axis.w)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
                     ui.end_row();
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.z_axis.x,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.z_axis.y,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.z_axis.z,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.z_axis.w,
-                        0f32..=1f32,
-                    ));
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.z_axis.x)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.z_axis.y)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.z_axis.z)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.z_axis.w)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
                     ui.end_row();
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.w_axis.x,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.w_axis.y,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.w_axis.z,
-                        0f32..=1f32,
-                    ));
-                    ui.add(egui::Slider::new(
-                        &mut self.game_state.r_slider.w_axis.w,
-                        0f32..=1f32,
-                    ));
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.w_axis.x)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.w_axis.y)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.w_axis.z)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
+                    ui.add(
+                        egui::DragValue::new(&mut self.game_state.r_slider.w_axis.w)
+                            .clamp_range(0f32..=1f32)
+                            .speed(0.01),
+                    );
                     ui.end_row();
                     // ui.label(self.game_state.r_slider.y_axis.x.to_string());
                     // ui.label(self.game_state.r_slider.y_axis.y.to_string());
