@@ -67,22 +67,22 @@ impl GameState {
 
             for _ in start..end {
                 let random_pos = match i {
-                    0 => Vec2::new(
-                        thread_rng().gen_range(-1f32..=0f32),
-                        thread_rng().gen_range(0f32..=1f32),
-                    ),
-                    1 => Vec2::new(
-                        thread_rng().gen_range(0f32..=1f32),
-                        thread_rng().gen_range(0f32..=1f32),
-                    ),
-                    2 => Vec2::new(
-                        thread_rng().gen_range(0f32..=1f32),
-                        thread_rng().gen_range(-1f32..=0f32),
-                    ),
-                    3 => Vec2::new(
-                        thread_rng().gen_range(-1f32..=0f32),
-                        thread_rng().gen_range(-1f32..=0f32),
-                    ),
+                    // 0 => Vec2::new(
+                    //     thread_rng().gen_range(-1f32..=0f32),
+                    //     thread_rng().gen_range(0f32..=1f32),
+                    // ),
+                    // 1 => Vec2::new(
+                    //     thread_rng().gen_range(0f32..=1f32),
+                    //     thread_rng().gen_range(0f32..=1f32),
+                    // ),
+                    // 2 => Vec2::new(
+                    //     thread_rng().gen_range(0f32..=1f32),
+                    //     thread_rng().gen_range(-1f32..=0f32),
+                    // ),
+                    // 3 => Vec2::new(
+                    //     thread_rng().gen_range(-1f32..=0f32),
+                    //     thread_rng().gen_range(-1f32..=0f32),
+                    // ),
                     _ => Vec2::new(
                         thread_rng().gen_range(-1f32..=1f32),
                         thread_rng().gen_range(-1f32..=1f32),
@@ -158,10 +158,9 @@ fn interaction(
         let mut vel = p1.vel * (1f32 - viscosity);
 
         if f.length() >= f32::EPSILON {
-            // let mut vel = p1.vel;
-            // let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
             vel += f * 0.00001f32;
         }
+
         vel = vel.clamp_length_max(MAX_VELOCITY);
 
         if BOUNDS_TOGGLE {
@@ -417,7 +416,7 @@ impl App {
                     group2_end,
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
-                    0.01f32,
+                    0.1f32,
                 );
             }
         }
