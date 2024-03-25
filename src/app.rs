@@ -94,11 +94,11 @@ impl GameState {
                     //     thread_rng().gen_range(-1f32..=1f32),
                     // ),
                     pos: random_pos,
-                    vel: Vec2::new(
-                        thread_rng().gen_range(-0.01f32..=0.01f32),
-                        thread_rng().gen_range(-0.01f32..=0.01f32),
-                    ),
-                    // vel: Vec2::new(0f32, 0f32),
+                    // vel: Vec2::new(
+                    //     thread_rng().gen_range(-0.01f32..=0.01f32),
+                    //     thread_rng().gen_range(-0.01f32..=0.01f32),
+                    // ),
+                    vel: Vec2::new(0f32, 0f32),
                     cls: i as u32,
                 };
                 self.particle_data.push(particle);
@@ -122,7 +122,10 @@ impl Particle {
         }
         let d = self.pos - other.pos;
         let r = d.length();
-        return (g * d.normalize()) / r;
+        if r < EPSILON {
+            return Vec2::new(0f32, 0f32);
+        }
+        return (g * d.normalize_or_zero()) / r;
     }
 }
 
@@ -154,7 +157,6 @@ fn interaction(
             .fold(Vec2::new(0f32, 0f32), |accum, p2| {
                 accum + p1.interact(p2, g)
             });
-
         let mut vel = p1.vel * (1f32 - viscosity);
 
         if f.length() >= f32::EPSILON {
@@ -210,8 +212,8 @@ impl App {
         let num_particles = UVec4::new(3000, 3000, 3000, 3000);
 
         #[cfg(not(target_arch = "wasm32"))]
-        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
-        // let num_particles = UVec4::new(10000, 10000, 10000, 10000);
+        // let num_particles = UVec4::new(5000, 5000, 5000, 5000);
+        let num_particles = UVec4::new(10000, 10000, 10000, 10000);
 
         let mut game_state = GameState {
             particle_data: Vec::with_capacity(
@@ -416,7 +418,7 @@ impl App {
                     group2_end,
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
-                    0.1f32,
+                    0.5f32,
                 );
             }
         }
@@ -428,6 +430,8 @@ impl eframe::App for App {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.horizontal_top(|ui| {
                 egui::Grid::new("power_slider").show(ui, |ui| {
+                    ui.label("Power");
+                    ui.end_row();
                     ui.add(
                         egui::DragValue::new(&mut self.game_state.power_slider.x_axis.x)
                             .clamp_range(-1f32..=1f32)
@@ -515,6 +519,8 @@ impl eframe::App for App {
                     ui.end_row();
                 });
                 egui::Grid::new("r_slider").show(ui, |ui| {
+                    ui.label("Radius");
+                    ui.end_row();
                     ui.add(
                         egui::DragValue::new(&mut self.game_state.r_slider.x_axis.x)
                             .clamp_range(0f32..=1f32)
