@@ -115,27 +115,27 @@ fn interaction(group1: &mut [Particle], group2: &[Particle], g: f32, radius: f32
             }
         });
 
+        let mut vel = p1.vel * (1f32 - viscosity);
+
         if f.length() >= f32::EPSILON {
-            // let mut vel = p1.vel;
-            // let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
-            let mut vel = (p1.vel * (1f32 - viscosity)) + (f * 0.00001f32);
-
-            if vel.length() > MAX_VELOCITY {
-                vel = vel.normalize() * MAX_VELOCITY;
-            }
-
-            if BOUNDS_TOGGLE {
-                //not good enough! Need fixing
-                if (p1.pos.x >= 1f32) || (p1.pos.x <= -1f32) {
-                    vel.x *= -1f32;
-                }
-                if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
-                    vel.y *= -1f32;
-                }
-            }
-            p1.pos += vel;
-            p1.vel = vel;
+            vel += f * 0.00001f32;
         }
+
+        if vel.length() > MAX_VELOCITY {
+            vel = vel.normalize() * MAX_VELOCITY;
+        }
+
+        if BOUNDS_TOGGLE {
+            //not good enough! Need fixing
+            if (p1.pos.x >= 1f32) || (p1.pos.x <= -1f32) {
+                vel.x *= -1f32;
+            }
+            if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
+                vel.y *= -1f32;
+            }
+        }
+        p1.pos += vel;
+        p1.vel = vel;
     })
 }
 
@@ -359,7 +359,7 @@ impl App {
                     &particles_data_copy[group2_start as usize..group2_end],
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
-                    0.5f32,
+                    0.1f32,
                 );
             }
         }
