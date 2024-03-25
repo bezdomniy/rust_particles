@@ -122,13 +122,13 @@ fn interaction(
                 }
             });
 
-            if f.length() < f32::EPSILON {
-                return *p1;
-            }
-
             // let mut vel = p1.vel;
             // let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
-            let mut vel = (p1.vel * (1f32 - viscosity)) + (f * 0.00001f32);
+            let mut vel = p1.vel * (1f32 - viscosity);
+
+            if f.length() >= f32::EPSILON {
+                vel += f * 0.00001f32;
+            }
 
             if vel.length() > MAX_VELOCITY {
                 vel = vel.normalize() * MAX_VELOCITY;
@@ -372,7 +372,7 @@ impl App {
                     &self.game_state.particle_data[group2_start as usize..group2_end],
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
-                    0.5f32,
+                    0.1f32,
                 );
                 self.game_state
                     .particle_data
