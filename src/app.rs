@@ -1,7 +1,7 @@
 use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distributions::Uniform, thread_rng, Rng};
-use std::borrow::Cow;
+use std::{borrow::Cow, f32::EPSILON};
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -22,6 +22,8 @@ use eframe::{
     },
     wgpu::util::DeviceExt,
 };
+
+use crate::bvh::Bvh;
 
 const FRAMERATE: u32 = 30;
 const BOUNDS_TOGGLE: bool = true;
@@ -64,17 +66,42 @@ impl GameState {
                 );
 
             for _ in start..end {
-                self.particle_data.push(Particle {
-                    pos: Vec2::new(
+                let random_pos = match i {
+                    // 0 => Vec2::new(
+                    //     thread_rng().gen_range(-1f32..=0f32),
+                    //     thread_rng().gen_range(0f32..=1f32),
+                    // ),
+                    // 1 => Vec2::new(
+                    //     thread_rng().gen_range(0f32..=1f32),
+                    //     thread_rng().gen_range(0f32..=1f32),
+                    // ),
+                    // 2 => Vec2::new(
+                    //     thread_rng().gen_range(0f32..=1f32),
+                    //     thread_rng().gen_range(-1f32..=0f32),
+                    // ),
+                    // 3 => Vec2::new(
+                    //     thread_rng().gen_range(-1f32..=0f32),
+                    //     thread_rng().gen_range(-1f32..=0f32),
+                    // ),
+                    _ => Vec2::new(
                         thread_rng().gen_range(-1f32..=1f32),
                         thread_rng().gen_range(-1f32..=1f32),
                     ),
-                    vel: Vec2::new(
-                        thread_rng().gen_range(-0.001f32..=0.001f32),
-                        thread_rng().gen_range(-0.001f32..=0.001f32),
-                    ),
+                };
+                let particle = Particle {
+                    // pos: Vec2::new(
+                    //     thread_rng().gen_range(-1f32..=1f32),
+                    //     thread_rng().gen_range(-1f32..=1f32),
+                    // ),
+                    pos: random_pos,
+                    // vel: Vec2::new(
+                    //     thread_rng().gen_range(-0.01f32..=0.01f32),
+                    //     thread_rng().gen_range(-0.01f32..=0.01f32),
+                    // ),
+                    vel: Vec2::new(0f32, 0f32),
                     cls: i as u32,
-                });
+                };
+                self.particle_data.push(particle);
             }
         }
     }
@@ -82,76 +109,77 @@ impl GameState {
 
 #[repr(C)]
 #[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Particle {
-    pos: Vec2,
+pub struct Particle {
+    pub pos: Vec2,
     vel: Vec2,
     cls: u32,
 }
 
+impl Particle {
+    pub fn interact(self: &Particle, other: &Particle, g: f32) -> Vec2 {
+        if std::ptr::eq(self, other) {
+            return Vec2::new(0f32, 0f32);
+        }
+        let d = self.pos - other.pos;
+        let r = d.length();
+        if r < EPSILON {
+            return Vec2::new(0f32, 0f32);
+        }
+        return (-g * d.normalize_or_zero()) / r;
+    }
+}
+
 // Interaction between 2 particle groups
 fn interaction(
-    group1: &[Particle],
-    group2: &[Particle],
+    particles: &mut Vec<Particle>,
+    bvh: &Bvh,
+    group1_start: usize,
+    group1_end: usize,
+    group2_start: usize,
+    group2_end: usize,
     g: f32,
     radius: f32,
     viscosity: f32,
-) -> Vec<Particle> {
+) {
+    let group2 = &particles.clone()[group2_start as usize..group2_end];
+    let group1 = &mut particles[group1_start as usize..group1_end];
     #[cfg(target_arch = "wasm32")]
-    let g_iter = group1.iter();
+    let g_iter = group1.iter_mut();
     #[cfg(not(target_arch = "wasm32"))]
-    let g_iter = group1.par_iter();
+    let g_iter = group1.par_iter_mut();
 
-    g_iter
-        .map(|p1| {
-            let mut f = Vec2::new(0f32, 0f32);
-            group2.iter().for_each(|p2| {
-                // let d_sq = p1.pos.distance_squared(p2.pos);
-
-                // let force = if d_sq < radius * radius && d_sq > 0f32 {
-                //     1f32 / d_sq.sqrt()
-                // } else {
-                //     0f32
-                // };
-
-                // f += (p1.pos - p2.pos) * force;
-
-                let d = p1.pos - p2.pos;
-                let r = d.length();
-                if r < radius && r > 0f32 {
-                    f += (g * d.normalize()) / r;
-                }
+    g_iter.for_each(|p1| {
+        let f = bvh
+            .intersect(p1, radius, group2)
+            // let f = group2
+            .iter()
+            // .filter(|p2| !std::ptr::eq(p1, *p2))
+            .fold(Vec2::new(0f32, 0f32), |accum, p2| {
+                accum + p1.interact(p2, g)
             });
+        let mut vel = p1.vel * (1f32 - viscosity);
 
-            // let mut vel = p1.vel;
-            // let mut vel = (p1.vel + (f * g)) * (1f32 - viscosity);
-            let mut vel = p1.vel * (1f32 - viscosity);
+        if f.length() >= f32::EPSILON {
+            vel += f * 0.00001f32;
+        }
 
-            if f.length() >= f32::EPSILON {
-                vel += f * 0.00001f32;
+        vel = vel.clamp_length_max(MAX_VELOCITY);
+
+        if BOUNDS_TOGGLE {
+            //not good enough! Need fixing
+            if (p1.pos.x >= 1f32) || (p1.pos.x <= -1f32) {
+                vel.x *= -1f32;
+                p1.pos.x = (1f32 - EPSILON) * p1.pos.x.signum();
             }
-
-            if vel.length() > MAX_VELOCITY {
-                vel = vel.normalize() * MAX_VELOCITY;
+            if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
+                vel.y *= -1f32;
+                p1.pos.y = 1f32 * p1.pos.y.signum();
             }
+        }
 
-            if BOUNDS_TOGGLE {
-                //not good enough! Need fixing
-                if (p1.pos.x >= 1f32) || (p1.pos.x <= -1f32) {
-                    vel.x *= -1f32;
-                }
-                if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
-                    vel.y *= -1f32;
-                }
-            }
-            let pos = p1.pos + vel;
-
-            Particle {
-                pos,
-                vel,
-                cls: p1.cls,
-            }
-        })
-        .collect()
+        p1.pos += vel;
+        p1.vel = vel;
+    })
 }
 
 impl App {
@@ -161,23 +189,31 @@ impl App {
 
         let mut rng = rand::thread_rng();
 
+        // let power_vals: [f32; 16] = (0..16)
+        //     .map(|_| rng.sample(Uniform::new(-0.5f32, 0.5f32)))
+        //     .collect::<Vec<f32>>()
+        //     .try_into()
+        //     .unwrap();
+
         let power_vals: [f32; 16] = (0..16)
             .map(|_| rng.sample(Uniform::new(-1f32, 1f32)))
+            // .map(|_| 0f32)
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap();
 
         let r_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(0.01f32, 0.9f32)))
+            .map(|_| rng.sample(Uniform::new(0.01f32, 0.3f32)))
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap();
 
         #[cfg(target_arch = "wasm32")]
-        let num_particles = UVec4::new(1000, 1000, 1000, 1000);
+        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
 
         #[cfg(not(target_arch = "wasm32"))]
-        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
+        let num_particles = UVec4::new(5000, 5000, 5000, 5000);
+        // let num_particles = UVec4::new(10000, 10000, 10000, 10000);
 
         let mut game_state = GameState {
             particle_data: Vec::with_capacity(
@@ -367,16 +403,23 @@ impl App {
                     .unwrap_or(self.game_state.particle_data.len() as i32)
                     as usize;
 
-                let new_particle_data = interaction(
-                    &self.game_state.particle_data[group1_start as usize..group1_end],
-                    &self.game_state.particle_data[group2_start as usize..group2_end],
+                let bvh = Bvh::new(
+                    // &mut self.game_state.particle_data,
+                    &mut self.game_state.particle_data[group2_start as usize..group2_end],
+                    self.game_state.r_slider.col(i)[j],
+                );
+
+                interaction(
+                    &mut self.game_state.particle_data,
+                    &bvh,
+                    group1_start as usize,
+                    group1_end,
+                    group2_start as usize,
+                    group2_end,
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
-                    0.1f32,
+                    0.5f32,
                 );
-                self.game_state
-                    .particle_data
-                    .splice(group1_start as usize..group1_end, new_particle_data);
             }
         }
     }
@@ -385,6 +428,211 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::CentralPanel::default().show(ctx, |ui| {
+            egui::Window::new("Parameters")
+                .default_open(false)
+                .show(ctx, |ui| {
+                    ui.horizontal_top(|ui| {
+                        egui::Grid::new("power_slider").show(ui, |ui| {
+                            ui.label("Power");
+                            ui.label("Red");
+                            ui.label("Green");
+                            ui.label("Blue");
+                            ui.label("White");
+                            ui.end_row();
+
+                            ui.label("Red");
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.x)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.y)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.z)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.w)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.end_row();
+
+                            ui.label("Green");
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.x)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.y)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.z)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.w)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.end_row();
+
+                            ui.label("Blue");
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.x)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.y)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.z)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.w)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.end_row();
+
+                            ui.label("White");
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.x)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.y)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.z)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.w)
+                                    .clamp_range(-1f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.end_row();
+                        });
+                        egui::Grid::new("r_slider").show(ui, |ui| {
+                            ui.label("Radius");
+                            ui.label("Red");
+                            ui.label("Green");
+                            ui.label("Blue");
+                            ui.label("White");
+                            ui.end_row();
+                            ui.label("Red");
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.x_axis.x)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.x_axis.y)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.x_axis.z)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.x_axis.w)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.end_row();
+
+                            ui.label("Green");
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.y_axis.x)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.y_axis.y)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.y_axis.z)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.y_axis.w)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.end_row();
+                            ui.label("Blue");
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.z_axis.x)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.z_axis.y)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.z_axis.z)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.z_axis.w)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.end_row();
+
+                            ui.label("White");
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.w_axis.x)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.w_axis.y)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.w_axis.z)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.r_slider.w_axis.w)
+                                    .clamp_range(0f32..=1f32)
+                                    .speed(0.01),
+                            );
+                            ui.end_row();
+                        });
+                    })
+                });
+
             egui::Frame::canvas(ui.style())
                 .fill(Color32::BLACK)
                 .show(ui, |ui| {
