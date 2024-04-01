@@ -125,7 +125,7 @@ impl Particle {
         if r < EPSILON {
             return Vec2::new(0f32, 0f32);
         }
-        return (g * d.normalize_or_zero()) / r;
+        return (-g * d.normalize_or_zero()) / r;
     }
 }
 
@@ -212,8 +212,8 @@ impl App {
         let num_particles = UVec4::new(3000, 3000, 3000, 3000);
 
         #[cfg(not(target_arch = "wasm32"))]
-        // let num_particles = UVec4::new(5000, 5000, 5000, 5000);
-        let num_particles = UVec4::new(10000, 10000, 10000, 10000);
+        let num_particles = UVec4::new(5000, 5000, 5000, 5000);
+        // let num_particles = UVec4::new(10000, 10000, 10000, 10000);
 
         let mut game_state = GameState {
             particle_data: Vec::with_capacity(
