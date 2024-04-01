@@ -418,7 +418,7 @@ impl App {
                     group2_end,
                     self.game_state.power_slider.col(i)[j],
                     self.game_state.r_slider.col(i)[j],
-                    0.1f32,
+                    0.5f32,
                 );
             }
         }
