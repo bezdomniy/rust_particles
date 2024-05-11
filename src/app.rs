@@ -37,6 +37,7 @@ pub struct App {
     _target_frame_time: Duration,
 }
 
+#[derive(Clone)]
 struct GameState {
     particle_data: Vec<Particle>,
     particle_offsets: [i32; 4],
@@ -104,6 +105,50 @@ impl GameState {
                     cls: i as u32,
                 };
                 self.particle_data.push(particle);
+            }
+        }
+    }
+    fn update(&mut self) {
+        for (i, group1_start) in self.particle_offsets.into_iter().enumerate() {
+            if group1_start < 0 {
+                continue;
+            }
+
+            let group1_end = self
+                .particle_offsets
+                .into_iter()
+                .skip(i + 1)
+                .find(|&item| item > 0)
+                .unwrap_or(self.particle_data.len() as i32) as usize;
+
+            for (j, group2_start) in self.particle_offsets.into_iter().enumerate() {
+                if group2_start < 0 {
+                    continue;
+                }
+
+                let group2_end =
+                    self.particle_offsets
+                        .into_iter()
+                        .skip(j + 1)
+                        .find(|&item| item > 0)
+                        .unwrap_or(self.particle_data.len() as i32) as usize;
+
+                let bvh = Bvh::new(
+                    &mut self.particle_data[group2_start as usize..group2_end],
+                    self.r_slider.col(i)[j],
+                );
+
+                interaction(
+                    &mut self.particle_data,
+                    &bvh,
+                    group1_start as usize,
+                    group1_end,
+                    group2_start as usize,
+                    group2_end,
+                    self.power_slider.col(i)[j],
+                    self.r_slider.col(i)[j],
+                    0.5f32,
+                );
             }
         }
     }
@@ -412,55 +457,6 @@ impl App {
         // self.vertex_buffer = Some(vertex_buffer);
         // self.index_buffer = Some(index_buffer);
     }
-
-    fn update(&mut self) {
-        for (i, group1_start) in self.game_state.particle_offsets.into_iter().enumerate() {
-            if group1_start < 0 {
-                continue;
-            }
-
-            let group1_end =
-                self.game_state
-                    .particle_offsets
-                    .into_iter()
-                    .skip(i + 1)
-                    .find(|&item| item > 0)
-                    .unwrap_or(self.game_state.particle_data.len() as i32) as usize;
-
-            for (j, group2_start) in self.game_state.particle_offsets.into_iter().enumerate() {
-                if group2_start < 0 {
-                    continue;
-                }
-
-                let group2_end = self
-                    .game_state
-                    .particle_offsets
-                    .into_iter()
-                    .skip(j + 1)
-                    .find(|&item| item > 0)
-                    .unwrap_or(self.game_state.particle_data.len() as i32)
-                    as usize;
-
-                let bvh = Bvh::new(
-                    // &mut self.game_state.particle_data,
-                    &mut self.game_state.particle_data[group2_start as usize..group2_end],
-                    self.game_state.r_slider.col(i)[j],
-                );
-
-                interaction(
-                    &mut self.game_state.particle_data,
-                    &bvh,
-                    group1_start as usize,
-                    group1_end,
-                    group2_start as usize,
-                    group2_end,
-                    self.game_state.power_slider.col(i)[j],
-                    self.game_state.r_slider.col(i)[j],
-                    0.5f32,
-                );
-            }
-        }
-    }
 }
 
 impl eframe::App for App {
@@ -674,7 +670,7 @@ impl eframe::App for App {
             egui::Frame::canvas(ui.style())
                 .fill(Color32::BLACK)
                 .show(ui, |ui| {
-                    self.update();
+                    self.game_state.update();
                     log::info!(
                         "FPS: {:?}",
                         1000u128 / self.last_update_inst.elapsed().as_millis()
@@ -687,7 +683,8 @@ impl eframe::App for App {
 }
 
 struct CustomCallback {
-    particle_data: Vec<Particle>,
+    // particle_data: Vec<Particle>,
+    game_state: GameState,
 }
 
 impl egui_wgpu::CallbackTrait for CustomCallback {
@@ -703,7 +700,7 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         resources.prepare(
             device,
             queue,
-            &self.particle_data,
+            &self.game_state.particle_data,
             screen_descriptor.size_in_pixels,
         );
         Vec::new()
@@ -716,7 +713,7 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         resources: &'a egui_wgpu::CallbackResources,
     ) {
         let resources: &RenderResources = resources.get().unwrap();
-        resources.paint(render_pass, self.particle_data.len());
+        resources.paint(render_pass, self.game_state.particle_data.len());
     }
 }
 
@@ -727,7 +724,8 @@ impl App {
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
             CustomCallback {
-                particle_data: self.game_state.particle_data.clone(),
+                // particle_data: self.game_state.particle_data.clone(),
+                game_state: self.game_state.clone(),
             },
         ));
         self.last_update_inst = Instant::now();
