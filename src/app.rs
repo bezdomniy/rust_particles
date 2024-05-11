@@ -700,7 +700,7 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         resources.prepare(
             device,
             queue,
-            &self.game_state.particle_data,
+            &self.game_state,
             screen_descriptor.size_in_pixels,
         );
         Vec::new()
@@ -742,7 +742,7 @@ struct RenderResources {
 }
 
 impl RenderResources {
-    fn prepare(&self, _device: &Device, queue: &Queue, particle_data: &[Particle], size: [u32; 2]) {
+    fn prepare(&self, _device: &Device, queue: &Queue, game_state: &GameState, size: [u32; 2]) {
         let aspect_ratio = size[0] as f32 / size[1] as f32;
 
         let transform =
@@ -757,7 +757,7 @@ impl RenderResources {
         queue.write_buffer(
             &self.particle_buffer,
             0,
-            bytemuck::cast_slice(particle_data),
+            bytemuck::cast_slice(game_state.particle_data.as_slice()),
         );
     }
 
