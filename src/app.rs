@@ -26,7 +26,7 @@ use eframe::{
 use crate::bvh::Bvh;
 
 const FRAMERATE: u32 = 30;
-const BOUNDS_TOGGLE: bool = true;
+const BOUNDS_TOGGLE: bool = false;
 const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 const MAX_VELOCITY: f32 = 0.1f32;
@@ -47,6 +47,8 @@ struct GameState {
 
 impl GameState {
     fn init_particles(&mut self) {
+        let spread = 0.8f32;
+        let aspect_ratio = 4f32 / 3f32;
         for i in 0..4 {
             if self.particle_offsets[i] < 0 {
                 continue;
@@ -84,8 +86,8 @@ impl GameState {
                     //     thread_rng().gen_range(-1f32..=0f32),
                     // ),
                     _ => Vec2::new(
-                        thread_rng().gen_range(-1f32..=1f32),
-                        thread_rng().gen_range(-1f32..=1f32),
+                        thread_rng().gen_range(-spread * aspect_ratio..=spread * aspect_ratio),
+                        thread_rng().gen_range(-spread / aspect_ratio..=spread / aspect_ratio),
                     ),
                 };
                 let particle = Particle {
@@ -213,6 +215,7 @@ impl App {
 
         #[cfg(not(target_arch = "wasm32"))]
         let num_particles = UVec4::new(5000, 5000, 5000, 5000);
+        // let num_particles = UVec4::new(50, 50, 50, 50);
         // let num_particles = UVec4::new(10000, 10000, 10000, 10000);
 
         let mut game_state = GameState {
@@ -284,7 +287,7 @@ impl App {
 
         let transform = Mat4::IDENTITY;
         let mx_ref: &[f32; 16] = transform.as_ref();
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
             contents: bytemuck::cast_slice(mx_ref),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -295,7 +298,7 @@ impl App {
             layout: &bind_group_layout,
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: uniform_buf.as_entire_binding(),
+                resource: uniform_buffer.as_entire_binding(),
             }],
             label: None,
         });
@@ -379,6 +382,7 @@ impl App {
                 render_bind_group: bind_group,
                 render_pipeline,
                 index_buffer,
+                uniform_buffer,
                 particle_buffer,
                 vertex_buffer,
             });
@@ -691,12 +695,17 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _screen_descriptor: &ScreenDescriptor,
+        screen_descriptor: &ScreenDescriptor,
         _egui_encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let resources: &RenderResources = resources.get().unwrap();
-        resources.prepare(device, queue, &self.particle_data);
+        resources.prepare(
+            device,
+            queue,
+            &self.particle_data,
+            screen_descriptor.size_in_pixels,
+        );
         Vec::new()
     }
 
@@ -728,13 +737,25 @@ impl App {
 struct RenderResources {
     render_bind_group: BindGroup,
     render_pipeline: RenderPipeline,
+    uniform_buffer: Buffer,
     particle_buffer: Buffer,
     vertex_buffer: Buffer,
     index_buffer: Buffer,
 }
 
 impl RenderResources {
-    fn prepare(&self, _device: &Device, queue: &Queue, particle_data: &[Particle]) {
+    fn prepare(&self, _device: &Device, queue: &Queue, particle_data: &[Particle], size: [u32; 2]) {
+        let aspect_ratio = size[0] as f32 / size[1] as f32;
+
+        let transform =
+            Mat4::orthographic_rh(-aspect_ratio, aspect_ratio, -1f32, 1f32, -1f32, 1f32);
+
+        queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            bytemuck::cast_slice(&transform.to_cols_array()),
+        );
+
         queue.write_buffer(
             &self.particle_buffer,
             0,
