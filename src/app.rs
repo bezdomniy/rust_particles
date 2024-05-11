@@ -26,7 +26,7 @@ use eframe::{
 use crate::bvh::Bvh;
 
 const FRAMERATE: u32 = 30;
-const BOUNDS_TOGGLE: bool = false;
+const BOUNDS_TOGGLE: bool = true;
 const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 const MAX_VELOCITY: f32 = 0.1f32;
@@ -88,7 +88,7 @@ impl GameState {
                     // ),
                     _ => Vec2::new(
                         thread_rng().gen_range(-spread * aspect_ratio..=spread * aspect_ratio),
-                        thread_rng().gen_range(-spread / aspect_ratio..=spread / aspect_ratio),
+                        thread_rng().gen_range(-spread..=spread),
                     ),
                 };
                 let particle = Particle {
@@ -108,7 +108,7 @@ impl GameState {
             }
         }
     }
-    fn update(&mut self) {
+    fn update(&mut self, aspect_ratio: f32) {
         for (i, group1_start) in self.particle_offsets.into_iter().enumerate() {
             if group1_start < 0 {
                 continue;
@@ -148,6 +148,7 @@ impl GameState {
                     self.power_slider.col(i)[j],
                     self.r_slider.col(i)[j],
                     0.5f32,
+                    aspect_ratio,
                 );
             }
         }
@@ -187,6 +188,7 @@ fn interaction(
     g: f32,
     radius: f32,
     viscosity: f32,
+    aspect_ratio: f32,
 ) {
     let group2 = &particles.clone()[group2_start as usize..group2_end];
     let group1 = &mut particles[group1_start as usize..group1_end];
@@ -214,9 +216,9 @@ fn interaction(
 
         if BOUNDS_TOGGLE {
             //not good enough! Need fixing
-            if (p1.pos.x >= 1f32) || (p1.pos.x <= -1f32) {
+            if (p1.pos.x >= aspect_ratio) || (p1.pos.x <= -aspect_ratio) {
                 vel.x *= -1f32;
-                p1.pos.x = (1f32 - EPSILON) * p1.pos.x.signum();
+                p1.pos.x = (aspect_ratio - EPSILON) * p1.pos.x.signum();
             }
             if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
                 vel.y *= -1f32;
@@ -670,7 +672,9 @@ impl eframe::App for App {
             egui::Frame::canvas(ui.style())
                 .fill(Color32::BLACK)
                 .show(ui, |ui| {
-                    self.game_state.update();
+                    self.game_state
+                        .update(ui.available_width() / ui.available_height());
+
                     log::info!(
                         "FPS: {:?}",
                         1000u128 / self.last_update_inst.elapsed().as_millis()
@@ -724,7 +728,6 @@ impl App {
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
             CustomCallback {
-                // particle_data: self.game_state.particle_data.clone(),
                 game_state: self.game_state.clone(),
             },
         ));
