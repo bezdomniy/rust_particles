@@ -20,7 +20,7 @@ use eframe::{
         wgpu::{self, Buffer, Device, Queue, RenderPass, RenderPipeline},
         ScreenDescriptor,
     },
-    wgpu::util::DeviceExt,
+    wgpu::{util::DeviceExt, BindGroup},
 };
 
 use crate::bvh::Bvh;
@@ -261,10 +261,43 @@ impl App {
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders/particles.wgsl"))),
         });
 
+        // Create pipeline layout
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(64),
+                },
+                count: None,
+            }],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
+        });
+
+        let transform = Mat4::IDENTITY;
+        let mx_ref: &[f32; 16] = transform.as_ref();
+        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Uniform Buffer"),
+            contents: bytemuck::cast_slice(mx_ref),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create bind group
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buf.as_entire_binding(),
+            }],
+            label: None,
         });
 
         // let swapchain_format = self.surface.get_supported_formats(&adapter)[0];
@@ -343,6 +376,7 @@ impl App {
             // .paint_callback_resources
             .callback_resources
             .insert(RenderResources {
+                render_bind_group: bind_group,
                 render_pipeline,
                 index_buffer,
                 particle_buffer,
@@ -692,6 +726,7 @@ impl App {
 }
 
 struct RenderResources {
+    render_bind_group: BindGroup,
     render_pipeline: RenderPipeline,
     particle_buffer: Buffer,
     vertex_buffer: Buffer,
@@ -708,6 +743,7 @@ impl RenderResources {
     }
 
     fn paint<'rp>(&'rp self, render_pass: &mut RenderPass<'rp>, num_particles: usize) {
+        render_pass.set_bind_group(0, &self.render_bind_group, &[]);
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
         render_pass.set_vertex_buffer(0, self.particle_buffer.slice(..));
