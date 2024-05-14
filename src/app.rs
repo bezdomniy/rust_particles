@@ -20,7 +20,7 @@ use eframe::{
         wgpu::{self, Buffer, Device, Queue, RenderPass, RenderPipeline},
         ScreenDescriptor,
     },
-    wgpu::util::DeviceExt,
+    wgpu::{util::DeviceExt, BindGroup},
 };
 
 use crate::bvh::Bvh;
@@ -37,6 +37,7 @@ pub struct App {
     _target_frame_time: Duration,
 }
 
+#[derive(Clone)]
 struct GameState {
     particle_data: Vec<Particle>,
     particle_offsets: [i32; 4],
@@ -47,6 +48,8 @@ struct GameState {
 
 impl GameState {
     fn init_particles(&mut self) {
+        let spread = 0.8f32;
+        let aspect_ratio = 4f32 / 3f32;
         for i in 0..4 {
             if self.particle_offsets[i] < 0 {
                 continue;
@@ -84,8 +87,8 @@ impl GameState {
                     //     thread_rng().gen_range(-1f32..=0f32),
                     // ),
                     _ => Vec2::new(
-                        thread_rng().gen_range(-1f32..=1f32),
-                        thread_rng().gen_range(-1f32..=1f32),
+                        thread_rng().gen_range(-spread * aspect_ratio..=spread * aspect_ratio),
+                        thread_rng().gen_range(-spread..=spread),
                     ),
                 };
                 let particle = Particle {
@@ -102,6 +105,51 @@ impl GameState {
                     cls: i as u32,
                 };
                 self.particle_data.push(particle);
+            }
+        }
+    }
+    fn update(&mut self, aspect_ratio: f32) {
+        for (i, group1_start) in self.particle_offsets.into_iter().enumerate() {
+            if group1_start < 0 {
+                continue;
+            }
+
+            let group1_end = self
+                .particle_offsets
+                .into_iter()
+                .skip(i + 1)
+                .find(|&item| item > 0)
+                .unwrap_or(self.particle_data.len() as i32) as usize;
+
+            for (j, group2_start) in self.particle_offsets.into_iter().enumerate() {
+                if group2_start < 0 {
+                    continue;
+                }
+
+                let group2_end =
+                    self.particle_offsets
+                        .into_iter()
+                        .skip(j + 1)
+                        .find(|&item| item > 0)
+                        .unwrap_or(self.particle_data.len() as i32) as usize;
+
+                let bvh = Bvh::new(
+                    &mut self.particle_data[group2_start as usize..group2_end],
+                    self.r_slider.col(i)[j],
+                );
+
+                interaction(
+                    &mut self.particle_data,
+                    &bvh,
+                    group1_start as usize,
+                    group1_end,
+                    group2_start as usize,
+                    group2_end,
+                    self.power_slider.col(i)[j],
+                    self.r_slider.col(i)[j],
+                    0.5f32,
+                    aspect_ratio,
+                );
             }
         }
     }
@@ -140,6 +188,7 @@ fn interaction(
     g: f32,
     radius: f32,
     viscosity: f32,
+    aspect_ratio: f32,
 ) {
     let group2 = &particles.clone()[group2_start as usize..group2_end];
     let group1 = &mut particles[group1_start as usize..group1_end];
@@ -167,9 +216,9 @@ fn interaction(
 
         if BOUNDS_TOGGLE {
             //not good enough! Need fixing
-            if (p1.pos.x >= 1f32) || (p1.pos.x <= -1f32) {
+            if (p1.pos.x >= aspect_ratio) || (p1.pos.x <= -aspect_ratio) {
                 vel.x *= -1f32;
-                p1.pos.x = (1f32 - EPSILON) * p1.pos.x.signum();
+                p1.pos.x = (aspect_ratio - EPSILON) * p1.pos.x.signum();
             }
             if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
                 vel.y *= -1f32;
@@ -213,6 +262,7 @@ impl App {
 
         #[cfg(not(target_arch = "wasm32"))]
         let num_particles = UVec4::new(5000, 5000, 5000, 5000);
+        // let num_particles = UVec4::new(50, 50, 50, 50);
         // let num_particles = UVec4::new(10000, 10000, 10000, 10000);
 
         let mut game_state = GameState {
@@ -261,10 +311,43 @@ impl App {
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders/particles.wgsl"))),
         });
 
+        // Create pipeline layout
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: None,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: wgpu::BufferSize::new(64),
+                },
+                count: None,
+            }],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
+        });
+
+        let transform = Mat4::IDENTITY;
+        let mx_ref: &[f32; 16] = transform.as_ref();
+        let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Uniform Buffer"),
+            contents: bytemuck::cast_slice(mx_ref),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create bind group
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+            label: None,
         });
 
         // let swapchain_format = self.surface.get_supported_formats(&adapter)[0];
@@ -343,8 +426,10 @@ impl App {
             // .paint_callback_resources
             .callback_resources
             .insert(RenderResources {
+                render_bind_group: bind_group,
                 render_pipeline,
                 index_buffer,
+                uniform_buffer,
                 particle_buffer,
                 vertex_buffer,
             });
@@ -373,55 +458,6 @@ impl App {
         // self.particle_buffer = Some(particle_buffer);
         // self.vertex_buffer = Some(vertex_buffer);
         // self.index_buffer = Some(index_buffer);
-    }
-
-    fn update(&mut self) {
-        for (i, group1_start) in self.game_state.particle_offsets.into_iter().enumerate() {
-            if group1_start < 0 {
-                continue;
-            }
-
-            let group1_end =
-                self.game_state
-                    .particle_offsets
-                    .into_iter()
-                    .skip(i + 1)
-                    .find(|&item| item > 0)
-                    .unwrap_or(self.game_state.particle_data.len() as i32) as usize;
-
-            for (j, group2_start) in self.game_state.particle_offsets.into_iter().enumerate() {
-                if group2_start < 0 {
-                    continue;
-                }
-
-                let group2_end = self
-                    .game_state
-                    .particle_offsets
-                    .into_iter()
-                    .skip(j + 1)
-                    .find(|&item| item > 0)
-                    .unwrap_or(self.game_state.particle_data.len() as i32)
-                    as usize;
-
-                let bvh = Bvh::new(
-                    // &mut self.game_state.particle_data,
-                    &mut self.game_state.particle_data[group2_start as usize..group2_end],
-                    self.game_state.r_slider.col(i)[j],
-                );
-
-                interaction(
-                    &mut self.game_state.particle_data,
-                    &bvh,
-                    group1_start as usize,
-                    group1_end,
-                    group2_start as usize,
-                    group2_end,
-                    self.game_state.power_slider.col(i)[j],
-                    self.game_state.r_slider.col(i)[j],
-                    0.5f32,
-                );
-            }
-        }
     }
 }
 
@@ -636,7 +672,9 @@ impl eframe::App for App {
             egui::Frame::canvas(ui.style())
                 .fill(Color32::BLACK)
                 .show(ui, |ui| {
-                    self.update();
+                    self.game_state
+                        .update(ui.available_width() / ui.available_height());
+
                     log::info!(
                         "FPS: {:?}",
                         1000u128 / self.last_update_inst.elapsed().as_millis()
@@ -649,7 +687,8 @@ impl eframe::App for App {
 }
 
 struct CustomCallback {
-    particle_data: Vec<Particle>,
+    // particle_data: Vec<Particle>,
+    game_state: GameState,
 }
 
 impl egui_wgpu::CallbackTrait for CustomCallback {
@@ -657,12 +696,17 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        _screen_descriptor: &ScreenDescriptor,
+        screen_descriptor: &ScreenDescriptor,
         _egui_encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let resources: &RenderResources = resources.get().unwrap();
-        resources.prepare(device, queue, &self.particle_data);
+        resources.prepare(
+            device,
+            queue,
+            &self.game_state,
+            screen_descriptor.size_in_pixels,
+        );
         Vec::new()
     }
 
@@ -673,7 +717,7 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         resources: &'a egui_wgpu::CallbackResources,
     ) {
         let resources: &RenderResources = resources.get().unwrap();
-        resources.paint(render_pass, self.particle_data.len());
+        resources.paint(render_pass, self.game_state.particle_data.len());
     }
 }
 
@@ -684,7 +728,7 @@ impl App {
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
             CustomCallback {
-                particle_data: self.game_state.particle_data.clone(),
+                game_state: self.game_state.clone(),
             },
         ));
         self.last_update_inst = Instant::now();
@@ -692,22 +736,36 @@ impl App {
 }
 
 struct RenderResources {
+    render_bind_group: BindGroup,
     render_pipeline: RenderPipeline,
+    uniform_buffer: Buffer,
     particle_buffer: Buffer,
     vertex_buffer: Buffer,
     index_buffer: Buffer,
 }
 
 impl RenderResources {
-    fn prepare(&self, _device: &Device, queue: &Queue, particle_data: &[Particle]) {
+    fn prepare(&self, _device: &Device, queue: &Queue, game_state: &GameState, size: [u32; 2]) {
+        let aspect_ratio = size[0] as f32 / size[1] as f32;
+
+        let transform =
+            Mat4::orthographic_rh(-aspect_ratio, aspect_ratio, -1f32, 1f32, -1f32, 1f32);
+
+        queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            bytemuck::cast_slice(&transform.to_cols_array()),
+        );
+
         queue.write_buffer(
             &self.particle_buffer,
             0,
-            bytemuck::cast_slice(particle_data),
+            bytemuck::cast_slice(game_state.particle_data.as_slice()),
         );
     }
 
     fn paint<'rp>(&'rp self, render_pass: &mut RenderPass<'rp>, num_particles: usize) {
+        render_pass.set_bind_group(0, &self.render_bind_group, &[]);
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
         render_pass.set_vertex_buffer(0, self.particle_buffer.slice(..));
