@@ -27,6 +27,48 @@ fn point_in_circle(centre: Vec2, radius: f32, point: Vec2) -> bool {
     // return square_dist <= radius ** 2
 }
 
+#[derive(Debug, Default, Copy, Clone)]
+struct MortonPrimitive {
+    primitve_index: usize,
+    morton_code: u32,
+}
+
+fn radix_sort(inp: &mut Vec<MortonPrimitive>) -> Vec<MortonPrimitive> {
+    let mut out = inp.clone();
+    const BITS_PER_PASS: u32 = 6;
+    const N_BITS: u32 = 30;
+    const N_PASSES: u32 = N_BITS / BITS_PER_PASS;
+    const BIT_MASK: u32 = (1 << BITS_PER_PASS) - 1;
+    const N_BUCKETS: usize = 1 << BITS_PER_PASS;
+
+    (0..N_PASSES).for_each(|pass| {
+        if pass > 0 {
+            std::mem::swap(inp, &mut out);
+        };
+
+        let low_bit: u32 = pass * BITS_PER_PASS;
+        let mut bucket_count = [0; N_BUCKETS];
+
+        inp.iter().for_each(|morton_primitive| {
+            let bucket = ((morton_primitive.morton_code >> low_bit) & BIT_MASK) as usize;
+            bucket_count[bucket] += 1;
+        });
+
+        let mut out_index = [0; N_BUCKETS];
+        for i in 1..out_index.len() {
+            out_index[i] = out_index[i - 1] + bucket_count[i - 1];
+        }
+
+        inp.iter().for_each(|morton_primitive| {
+            let bucket = ((morton_primitive.morton_code >> low_bit) & BIT_MASK) as usize;
+            out[out_index[bucket]] = *morton_primitive;
+            out_index[bucket] += 1;
+        });
+    });
+
+    out
+}
+
 impl NodeInner {
     pub fn new(centre: Vec2, radius: f32, skip_ptr_or_prim_idx1: u32, prim_idx2: u32) -> Self {
         NodeInner {
@@ -90,7 +132,7 @@ impl NodeInner {
 // }
 
 // type Bvh = Vec<NodeInner>;
-pub struct Bvh(Vec<NodeInner>);
+pub struct Bvh(pub Vec<NodeInner>);
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
@@ -105,9 +147,13 @@ impl Bvh {
         Bvh(vec![])
     }
 
-    pub fn new(particles: &mut [Particle], radius: f32) -> Self {
+    pub fn new(particles: &mut [Particle], radius: f32, linear: bool) -> Self {
         // return Bvh::empty()
-        let object_inner_nodes = Bvh::build(particles, radius);
+        let object_inner_nodes = if linear {
+            Bvh::build_linear(particles, radius)
+        } else {
+            Bvh::build(particles, radius)
+        };
 
         // object_leaf_nodes.push(triangles);
 
@@ -118,6 +164,10 @@ impl Bvh {
         // let n_objects = object_inner_nodes.len() as u32;
 
         Bvh(object_inner_nodes)
+    }
+
+    fn build_linear(particles: &mut [Particle], radius: f32) -> Vec<NodeInner> {
+        todo!()
     }
 
     fn build(particles: &mut [Particle], radius: f32) -> Vec<NodeInner> {
@@ -421,5 +471,39 @@ impl AABB {
     pub fn add_point(&self, point: &Vec2) -> Self {
         // println!("{:?} | {:?}", AABB::new(self.first, self.second), point);
         AABB::new(self.first.min(*point), self.second.max(*point))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_radix_sort() {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+
+        for power in 0..31 {
+            let mut vals = (0..1000)
+                .map(|_| rng.gen_range(0..2u32.pow(power)))
+                .collect::<Vec<_>>();
+
+            let mut inp: Vec<MortonPrimitive> = vals
+                .iter()
+                .enumerate()
+                .map(|(i, val)| MortonPrimitive {
+                    primitve_index: i,
+                    morton_code: *val,
+                })
+                .collect();
+
+            let out = radix_sort(&mut inp)
+                .iter()
+                .map(|x| x.morton_code)
+                .collect::<Vec<_>>();
+
+            vals.sort();
+            assert_eq!(out, vals);
+        }
     }
 }

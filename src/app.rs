@@ -136,6 +136,7 @@ impl GameState {
                 let bvh = Bvh::new(
                     &mut self.particle_data[group2_start as usize..group2_end],
                     self.r_slider.col(i)[j],
+                    false,
                 );
 
                 interaction(
