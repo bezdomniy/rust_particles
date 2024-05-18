@@ -1,10 +1,20 @@
-use glam::Vec2;
-use itertools::partition;
+use glam::{Vec2, Vec3};
+use itertools::{partition, Itertools};
 use std::f32::{consts::PI, INFINITY, NEG_INFINITY};
 
-use crate::app::Particle;
+use super::super::app::Particle;
 
 static MAX_SHAPES_IN_NODE: usize = 4;
+
+pub struct Bvh(pub Vec<NodeInner>);
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+enum SplitMethod {
+    Middle,
+    EqualCounts,
+    Sah,
+}
 
 #[derive(Debug, Default, Copy, Clone)]
 pub struct NodeInner {
@@ -69,6 +79,25 @@ fn radix_sort(inp: &mut Vec<MortonPrimitive>) -> Vec<MortonPrimitive> {
     out
 }
 
+fn left_shift_3(inp: u32) -> u32 {
+    let mut x = inp;
+
+    if x == (1 << 10) {
+        x -= 1;
+    }
+    x = (x | (x << 16)) & 0b00000011000000000000000011111111;
+    x = (x | (x << 8)) & 0b00000011000000001111000000001111;
+    x = (x | (x << 4)) & 0b00000011000011000011000011000011;
+    x = (x | (x << 2)) & 0b00001001001001001001001001001001;
+    x
+}
+
+fn encode_morton_3(inp: Vec3) -> u32 {
+    (left_shift_3(inp.z as u32) << 2)
+        | (left_shift_3(inp.y as u32) << 1)
+        | left_shift_3(inp.x as u32)
+}
+
 impl NodeInner {
     pub fn new(centre: Vec2, radius: f32, skip_ptr_or_prim_idx1: u32, prim_idx2: u32) -> Self {
         NodeInner {
@@ -125,68 +154,78 @@ impl NodeInner {
     }
 }
 
-// #[derive(Debug, Default)]
-// #[repr(C)]
-// pub struct Bvh {
-//     pub inner_nodes: Vec<NodeInner>,
-// }
-
-// type Bvh = Vec<NodeInner>;
-pub struct Bvh(pub Vec<NodeInner>);
-
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
-enum SplitMethod {
-    Middle,
-    EqualCounts,
-    Sah,
-}
-
 impl Bvh {
     pub fn empty() -> Self {
         Bvh(vec![])
     }
 
     pub fn new(particles: &mut [Particle], radius: f32, linear: bool) -> Self {
-        // return Bvh::empty()
-        let object_inner_nodes = if linear {
-            Bvh::build_linear(particles, radius)
-        } else {
-            Bvh::build(particles, radius)
-        };
+        let mut object_inner_nodes: Vec<NodeInner> =
+            Vec::with_capacity(particles.len().next_power_of_two());
 
-        // object_leaf_nodes.push(triangles);
+        if linear {
+            Bvh::build_linear(&mut object_inner_nodes, particles);
+        } else {
+            let split_method = SplitMethod::Sah;
+
+            Bvh::recursive_build(
+                &mut object_inner_nodes,
+                particles,
+                radius,
+                0,
+                particles.len(),
+                split_method,
+            );
+        }
 
         if object_inner_nodes.is_empty() {
             return Bvh::empty();
         }
-
-        // let n_objects = object_inner_nodes.len() as u32;
-
         Bvh(object_inner_nodes)
     }
 
-    fn build_linear(particles: &mut [Particle], radius: f32) -> Vec<NodeInner> {
-        todo!()
-    }
+    fn build_linear(bounding_circles: &mut Vec<NodeInner>, particles: &mut [Particle]) -> u32 {
+        let bounds = particles.iter().fold(AABB::empty(), |acc, new| {
+            acc.add_point(&new.bounds_centroid())
+        });
 
-    fn build(particles: &mut [Particle], radius: f32) -> Vec<NodeInner> {
-        let mut bounding_circles: Vec<NodeInner> =
-            Vec::with_capacity(particles.len().next_power_of_two());
+        const MORTON_BITS: u32 = 10;
+        const MORTON_SCALE: f32 = (1 << MORTON_BITS) as f32;
 
-        let split_method = SplitMethod::Sah;
+        let mut morton_primitives = (0..particles.len())
+            .map(|i| {
+                let centroid_offset = bounds.offset(&particles[i].pos);
+                let offset = centroid_offset * MORTON_SCALE;
+                MortonPrimitive {
+                    primitve_index: i,
+                    morton_code: encode_morton_3(Vec3::new(offset.x, offset.y, 0f32)),
+                }
+            })
+            .collect_vec();
 
-        Bvh::recursive_build(
-            &mut bounding_circles,
+        morton_primitives = radix_sort(&mut morton_primitives);
+
+        const FIRST_BIT_INDEX: i32 = 29 - 12;
+
+        Bvh::emit_lbvh(
+            bounding_circles,
             particles,
-            radius,
-            0,
+            morton_primitives.as_mut_slice(),
             particles.len(),
-            split_method,
+            FIRST_BIT_INDEX,
         );
 
-        // println!("{}", bounding_circles.len());
-        bounding_circles
+        bounding_circles.len() as u32
+    }
+
+    fn emit_lbvh(
+        bounding_circles: &mut Vec<NodeInner>,
+        particles: &mut [Particle],
+        morton_primitives: &mut [MortonPrimitive],
+        n_particles: usize,
+        bit_index: i32,
+    ) -> u32 {
+        todo!()
     }
 
     // TODO: make this return the skip pointer so it can bubble up
@@ -257,26 +296,14 @@ impl Bvh {
 
             if fallthrough || matches!(split_method, SplitMethod::EqualCounts) {
                 mid = (start + end) / 2;
-                // println!("{} {} {} {}", start, mid, end, particles.len());
-                // for x in &particles[start..end] {
-                //     if x.pos.x.is_nan() {
-                //         println!("{:?}", x);
-                //     }
-                // }
                 particles[start..end].select_nth_unstable_by(mid - start, |a, b| {
                     a.bounds_centroid()[split_dimension]
                         .partial_cmp(&b.bounds_centroid()[split_dimension])
                         .unwrap()
                 });
-                // for x in &particles[..] {
-                //     if x.pos.x.is_nan() {
-                //         println!("{:?}", x);
-                //     }
-                // }
             }
 
             if matches!(split_method, SplitMethod::Sah) {
-                // println!("{:?}", centroid_bounds);
                 if n_shapes <= 2 {
                     mid = (start + end) / 2;
                     particles[start..end].select_nth_unstable_by(mid - start, |a, b| {
@@ -371,11 +398,6 @@ impl Bvh {
                 Bvh::recursive_build(bounding_circles, particles, radius, mid, end, split_method);
 
             bounding_circles[curr_idx].skip_ptr_or_prim_idx1 = skip_ptr;
-
-            // println!("{:?}", bounds);
-
-            // bounds.skip_ptr_or_prim_idx1 = 2u32.pow((bvh_height - level) as u32) - 1;
-            // bounds.skip_ptr_or_prim_idx1 = 1;
         }
         bounding_circles.len() as u32
     }
@@ -397,14 +419,9 @@ impl Bvh {
             let current_node = &self.0[idx];
 
             let leaf_node: bool = current_node.prim_idx2 > 0u32;
-            // println!("{:?}", current_node);
 
             if point_in_circle(current_node.centre, current_node.radius, particle.pos) {
                 if leaf_node {
-                    // println!(
-                    //     "{} {}",
-                    //     current_node.skip_ptr_or_prim_idx1, current_node.prim_idx2
-                    // );
                     for prim_idx in (current_node.skip_ptr_or_prim_idx1)..(current_node.prim_idx2) {
                         if point_in_circle(particles[prim_idx as usize].pos, radius, particle.pos) {
                             ret.push(particles[prim_idx as usize]);
@@ -418,14 +435,7 @@ impl Bvh {
                 idx = current_node.skip_ptr_or_prim_idx1 as usize;
             }
         }
-        // if ret.len() > 0 {
-        //     println!("{}", ret.len());
-        // }
-        // for x in &ret[..] {
-        //     println!("{:?}", x);
-        // }
-        // return particles.to_vec();
-        return ret;
+        ret
     }
 }
 
@@ -440,7 +450,6 @@ impl Bounded for Particle {
     }
 
     fn bounds_centroid(&self) -> Vec2 {
-        // println!("{:?}", self.pos);
         self.pos
     }
 }
