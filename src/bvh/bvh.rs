@@ -39,7 +39,7 @@ fn point_in_circle(centre: Vec2, radius: f32, point: Vec2) -> bool {
 
 #[derive(Debug, Default, Copy, Clone)]
 struct MortonPrimitive {
-    primitve_index: usize,
+    primitive_index: usize,
     morton_code: u32,
 }
 
@@ -164,7 +164,7 @@ impl Bvh {
             Vec::with_capacity(particles.len().next_power_of_two());
 
         if linear {
-            Bvh::build_linear(&mut object_inner_nodes, particles);
+            Bvh::build_linear(&mut object_inner_nodes, particles, radius);
         } else {
             let split_method = SplitMethod::Sah;
 
@@ -181,10 +181,15 @@ impl Bvh {
         if object_inner_nodes.is_empty() {
             return Bvh::empty();
         }
+        println!("done bvh build.");
         Bvh(object_inner_nodes)
     }
 
-    fn build_linear(bounding_circles: &mut Vec<NodeInner>, particles: &mut [Particle]) -> u32 {
+    fn build_linear(
+        bounding_circles: &mut Vec<NodeInner>,
+        particles: &mut [Particle],
+        radius: f32,
+    ) -> u32 {
         let bounds = particles.iter().fold(AABB::empty(), |acc, new| {
             acc.add_point(&new.bounds_centroid())
         });
@@ -197,7 +202,7 @@ impl Bvh {
                 let centroid_offset = bounds.offset(&particles[i].pos);
                 let offset = centroid_offset * MORTON_SCALE;
                 MortonPrimitive {
-                    primitve_index: i,
+                    primitive_index: i,
                     morton_code: encode_morton_3(Vec3::new(offset.x, offset.y, 0f32)),
                 }
             })
@@ -207,11 +212,23 @@ impl Bvh {
 
         const FIRST_BIT_INDEX: i32 = 29 - 12;
 
+        let size = particles.len();
+
+        // let particles: Vec<Particle> = particles.iter().map(|p| p.clone()).collect();
+        let ordered_particles = morton_primitives
+            .iter()
+            .map(|mp| particles[mp.primitive_index])
+            .collect_vec();
+
+        particles.copy_from_slice(&ordered_particles);
+
         Bvh::emit_lbvh(
-            bounding_circles,
-            particles,
             morton_primitives.as_mut_slice(),
-            particles.len(),
+            particles,
+            bounding_circles,
+            radius,
+            0,
+            size,
             FIRST_BIT_INDEX,
         );
 
@@ -219,13 +236,87 @@ impl Bvh {
     }
 
     fn emit_lbvh(
-        bounding_circles: &mut Vec<NodeInner>,
-        particles: &mut [Particle],
         morton_primitives: &mut [MortonPrimitive],
-        n_particles: usize,
+        ordered_particles: &[Particle],
+        bounding_circles: &mut Vec<NodeInner>,
+        radius: f32,
+        start: usize,
+        end: usize,
         bit_index: i32,
     ) -> u32 {
-        todo!()
+        // println!("{:?}", bit_index);
+        let n_primitives = end - start;
+        let is_leaf: bool = bit_index == -1 || n_primitives <= 2;
+
+        let mut bounds = ordered_particles[start..end]
+            .iter()
+            .fold(NodeInner::empty(), |acc: NodeInner, new| {
+                acc.merge(&new.bounds(radius))
+            });
+
+        if is_leaf {
+            // println!("leaf, {} {}", bit_index, n_primitives);
+            bounds.skip_ptr_or_prim_idx1 = start as u32;
+            bounds.prim_idx2 = end as u32;
+            bounding_circles.push(bounds);
+        } else {
+            bounds.prim_idx2 = 0;
+
+            let mask = 1 << bit_index;
+            if (morton_primitives[start].morton_code & mask)
+                == (morton_primitives[end - 1].morton_code & mask)
+            {
+                Bvh::emit_lbvh(
+                    morton_primitives,
+                    ordered_particles,
+                    bounding_circles,
+                    radius,
+                    start,
+                    end,
+                    bit_index - 1,
+                );
+            }
+
+            let mut search_start = start;
+            let mut search_end = end - 1;
+            while search_start + 1 != search_end {
+                let mid = (search_start + search_end) / 2;
+                if (morton_primitives[search_start].morton_code & mask)
+                    == (morton_primitives[mid].morton_code & mask)
+                {
+                    search_start = mid;
+                } else {
+                    search_end = mid;
+                }
+            }
+            let split_offset = search_end;
+            // println!("{:?} {:?} {:?}", start, split_offset, end);
+
+            let curr_idx = bounding_circles.len();
+            bounding_circles.push(bounds);
+
+            Bvh::emit_lbvh(
+                morton_primitives,
+                ordered_particles,
+                bounding_circles,
+                radius,
+                start,
+                split_offset,
+                bit_index - 1,
+            );
+            let skip_ptr = Bvh::emit_lbvh(
+                morton_primitives,
+                ordered_particles,
+                bounding_circles,
+                radius,
+                split_offset,
+                end,
+                bit_index - 1,
+            );
+
+            bounding_circles[curr_idx].skip_ptr_or_prim_idx1 = skip_ptr;
+        }
+        bounding_circles.len() as u32
     }
 
     // TODO: make this return the skip pointer so it can bubble up
@@ -261,12 +352,12 @@ impl Bvh {
 
         let split_dimension = if diagonal.x > diagonal.y { 0 } else { 1 };
 
-        let n_shapes = end - start;
+        let n_primitives = end - start;
         // let mid = (start + end) / 2;
 
         let is_leaf: bool = centroid_bounds.first[split_dimension]
             == centroid_bounds.second[split_dimension]
-            || n_shapes <= 2;
+            || n_primitives <= 2;
 
         if is_leaf {
             // println!("leaf");
@@ -304,7 +395,7 @@ impl Bvh {
             }
 
             if matches!(split_method, SplitMethod::Sah) {
-                if n_shapes <= 2 {
+                if n_primitives <= 2 {
                     mid = (start + end) / 2;
                     particles[start..end].select_nth_unstable_by(mid - start, |a, b| {
                         a.bounds_centroid()[split_dimension]
@@ -362,8 +453,8 @@ impl Bvh {
                         }
                     }
 
-                    let leaf_cost = n_shapes as f32;
-                    if n_shapes > MAX_SHAPES_IN_NODE || min_cost < leaf_cost {
+                    let leaf_cost = n_primitives as f32;
+                    if n_primitives > MAX_SHAPES_IN_NODE || min_cost < leaf_cost {
                         mid = partition(particles[start..end].iter_mut(), |n| {
                             let mut b: usize = n_buckets
                                 * centroid_bounds.offset(&n.bounds_centroid())[split_dimension]
@@ -501,7 +592,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, val)| MortonPrimitive {
-                    primitve_index: i,
+                    primitive_index: i,
                     morton_code: *val,
                 })
                 .collect();
