@@ -181,7 +181,6 @@ impl Bvh {
         if object_inner_nodes.is_empty() {
             return Bvh::empty();
         }
-        println!("done bvh build.");
         Bvh(object_inner_nodes)
     }
 
@@ -266,7 +265,7 @@ impl Bvh {
             if (morton_primitives[start].morton_code & mask)
                 == (morton_primitives[end - 1].morton_code & mask)
             {
-                Bvh::emit_lbvh(
+                return Bvh::emit_lbvh(
                     morton_primitives,
                     ordered_particles,
                     bounding_circles,
@@ -277,20 +276,21 @@ impl Bvh {
                 );
             }
 
-            let mut search_start = start;
-            let mut search_end = end - 1;
-            while search_start + 1 != search_end {
-                let mid = (search_start + search_end) / 2;
-                if (morton_primitives[search_start].morton_code & mask)
-                    == (morton_primitives[mid].morton_code & mask)
-                {
-                    search_start = mid;
-                } else {
-                    search_end = mid;
-                }
-            }
-            let split_offset = search_end;
-            // println!("{:?} {:?} {:?}", start, split_offset, end);
+            // let mut search_start = start;
+            // let mut search_end = end - 1;
+            // while search_start + 1 != search_end {
+            //     let mid = (search_start + search_end) / 2;
+            //     if (morton_primitives[search_start].morton_code & mask)
+            //         == (morton_primitives[mid].morton_code & mask)
+            //     {
+            //         search_start = mid;
+            //     } else {
+            //         search_end = mid;
+            //     }
+            // }
+            // let split_offset = search_end;
+
+            let split_offset = (start + end) / 2;
 
             let curr_idx = bounding_circles.len();
             bounding_circles.push(bounds);
