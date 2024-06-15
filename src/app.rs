@@ -30,6 +30,7 @@ const BOUNDS_TOGGLE: bool = true;
 const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 const MAX_VELOCITY: f32 = 0.1f32;
+const USE_LINEAR_BVH: bool = false;
 
 pub struct App {
     game_state: GameState,
@@ -136,7 +137,7 @@ impl GameState {
                 let bvh = Bvh::new(
                     &mut self.particle_data[group2_start as usize..group2_end],
                     self.r_slider.col(i)[j],
-                    true,
+                    USE_LINEAR_BVH,
                 );
 
                 interaction(
@@ -262,9 +263,9 @@ impl App {
         let num_particles = UVec4::new(3000, 3000, 3000, 3000);
 
         #[cfg(not(target_arch = "wasm32"))]
-        let num_particles = UVec4::new(5000, 5000, 5000, 5000);
+        // let num_particles = UVec4::new(5000, 5000, 5000, 5000);
         // let num_particles = UVec4::new(50, 50, 50, 50);
-        // let num_particles = UVec4::new(10000, 10000, 10000, 10000);
+        let num_particles = UVec4::new(10000, 10000, 10000, 10000);
 
         let mut game_state = GameState {
             particle_data: Vec::with_capacity(
