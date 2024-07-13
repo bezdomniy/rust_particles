@@ -166,7 +166,7 @@ pub struct Particle {
 }
 
 impl Particle {
-    pub fn interact(self: &Particle, other: &Particle, g: f32) -> Vec2 {
+    pub fn _interact(self: &Particle, other: &Particle, g: f32) -> Vec2 {
         if std::ptr::eq(self, other) {
             return Vec2::new(0f32, 0f32);
         }
@@ -200,14 +200,7 @@ fn interaction(
     let g_iter = group1.par_iter_mut();
 
     g_iter.for_each(|p1| {
-        let f = bvh
-            .intersect(p1, radius, group2)
-            // let f = group2
-            .iter()
-            // .filter(|p2| !std::ptr::eq(p1, *p2))
-            .fold(Vec2::new(0f32, 0f32), |accum, p2| {
-                accum + p1.interact(p2, g)
-            });
+        let f = bvh.intersect(p1, radius, g, group2);
         let mut vel = p1.vel * (1f32 - viscosity);
 
         if f.length() >= f32::EPSILON {
