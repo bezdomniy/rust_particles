@@ -30,6 +30,7 @@ const BOUNDS_TOGGLE: bool = true;
 const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 const MAX_VELOCITY: f32 = 0.1f32;
+const VISCOSITY: f32 = 0.5f32;
 const USE_LINEAR_BVH: bool = false;
 
 pub struct App {
@@ -149,7 +150,7 @@ impl GameState {
                     group2_end,
                     self.power_slider.col(i)[j],
                     self.r_slider.col(i)[j],
-                    0.5f32,
+                    VISCOSITY,
                     aspect_ratio,
                 );
             }
