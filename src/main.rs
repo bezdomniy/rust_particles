@@ -6,7 +6,7 @@ fn main() {
     let _ = eframe::run_native(
         "Particles",
         options,
-        Box::new(|cc| Box::new(rust_particles::App::new(cc))),
+        Box::new(|cc| Ok(Box::new(rust_particles::App::new(cc)))),
     );
 }
 
@@ -22,7 +22,7 @@ fn main() {
             .start(
                 "canvas",
                 options,
-                Box::new(|cc| Box::new(rust_particles::App::new(cc))),
+                Box::new(|cc| Ok(Box::new(rust_particles::App::new(cc)))),
             )
             .await
             .expect("failed to start eframe");
