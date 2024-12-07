@@ -497,9 +497,10 @@ impl Bvh {
         &self,
         particle: &Particle,
         radius: f32,
+        g: f32,
         particles: &[Particle],
-    ) -> Vec<Particle> {
-        let mut ret = Vec::with_capacity(1000);
+    ) -> Vec2 {
+        let mut ret = Vec2::new(0f32, 0f32);
 
         let mut idx = 0;
         loop {
@@ -514,8 +515,17 @@ impl Bvh {
             if point_in_circle(current_node.centre, current_node.radius, particle.pos) {
                 if leaf_node {
                     for prim_idx in (current_node.skip_ptr_or_prim_idx1)..(current_node.prim_idx2) {
-                        if point_in_circle(particles[prim_idx as usize].pos, radius, particle.pos) {
-                            ret.push(particles[prim_idx as usize]);
+                        let p2 = &particles[prim_idx as usize];
+                        if point_in_circle(p2.pos, radius, particle.pos) {
+                            if std::ptr::eq(particle, p2) {
+                                continue;
+                            }
+                            let d = particle.pos - p2.pos;
+                            let r = d.length();
+                            if r < f32::EPSILON {
+                                continue;
+                            }
+                            ret += d.normalize_or_zero() / r;
                         }
                     }
                 }
@@ -526,7 +536,7 @@ impl Bvh {
                 idx = current_node.skip_ptr_or_prim_idx1 as usize;
             }
         }
-        ret
+        ret * -g
     }
 }
 
