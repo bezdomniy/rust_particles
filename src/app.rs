@@ -416,6 +416,7 @@ impl App {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+            cache: Default::default(),
         });
 
         wgpu_render_state
@@ -708,11 +709,11 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         Vec::new()
     }
 
-    fn paint<'a>(
+    fn paint(
         &self,
         _info: egui::PaintCallbackInfo,
-        render_pass: &mut wgpu::RenderPass<'a>,
-        resources: &'a egui_wgpu::CallbackResources,
+        render_pass: &mut wgpu::RenderPass<'static>,
+        resources: &egui_wgpu::CallbackResources,
     ) {
         let resources: &RenderResources = resources.get().unwrap();
         resources.paint(render_pass, self.game_state.particle_data.len());
@@ -762,7 +763,7 @@ impl RenderResources {
         );
     }
 
-    fn paint<'rp>(&'rp self, render_pass: &mut RenderPass<'rp>, num_particles: usize) {
+    fn paint(&self, render_pass: &mut RenderPass<'_>, num_particles: usize) {
         render_pass.set_bind_group(0, &self.render_bind_group, &[]);
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
