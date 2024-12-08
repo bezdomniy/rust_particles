@@ -29,8 +29,12 @@ const FRAMERATE: u32 = 30;
 const BOUNDS_TOGGLE: bool = true;
 const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
-const MAX_VELOCITY: f32 = 0.1f32;
-const VISCOSITY: f32 = 0.5f32;
+// const MAX_VELOCITY: f32 = 1f32;
+// const MAX_VELOCITY: f32 = 0.1f32;
+// const VISCOSITY: f32 = 0.5f32;
+// const VISCOSITY: f32 = 0.0005;
+const VISCOSITY: f32 = 0.0009765625;
+const REPULSE_RADIUS: f32 = 0.25;
 const USE_LINEAR_BVH: bool = false;
 
 pub struct App {
@@ -166,20 +170,6 @@ pub struct Particle {
     cls: u32,
 }
 
-impl Particle {
-    pub fn _interact(self: &Particle, other: &Particle, g: f32) -> Vec2 {
-        if std::ptr::eq(self, other) {
-            return Vec2::new(0f32, 0f32);
-        }
-        let d = self.pos - other.pos;
-        let r = d.length();
-        if r < EPSILON {
-            return Vec2::new(0f32, 0f32);
-        }
-        return (-g * d.normalize_or_zero()) / r;
-    }
-}
-
 // Interaction between 2 particle groups
 fn interaction(
     particles: &mut Vec<Particle>,
@@ -201,29 +191,26 @@ fn interaction(
     let g_iter = group1.par_iter_mut();
 
     g_iter.for_each(|p1| {
-        let f = bvh.intersect(p1, radius, g, group2);
-        let mut vel = p1.vel * (1f32 - viscosity);
+        let f = bvh.intersect(p1, radius, g, REPULSE_RADIUS, group2);
 
-        if f.length() >= f32::EPSILON {
-            vel += f * 0.00001f32;
-        }
+        p1.vel += f;
+        p1.vel *= viscosity;
 
-        vel = vel.clamp_length_max(MAX_VELOCITY);
+        // p1.vel = p1.vel.clamp_length_max(MAX_VELOCITY);
 
         if BOUNDS_TOGGLE {
             //not good enough! Need fixing
             if (p1.pos.x >= aspect_ratio) || (p1.pos.x <= -aspect_ratio) {
-                vel.x *= -1f32;
+                p1.vel.x *= -1f32;
                 p1.pos.x = (aspect_ratio - EPSILON) * p1.pos.x.signum();
             }
             if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
-                vel.y *= -1f32;
+                p1.vel.y *= -1f32;
                 p1.pos.y = 1f32 * p1.pos.y.signum();
             }
         }
 
-        p1.pos += vel;
-        p1.vel = vel;
+        p1.pos += p1.vel;
     })
 }
 
