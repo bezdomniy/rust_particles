@@ -378,7 +378,7 @@ impl App {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "main_vs",
+                entry_point: Some("main_vs"),
                 buffers: &[
                     wgpu::VertexBufferLayout {
                         array_stride: 5 * 4,
@@ -395,7 +395,7 @@ impl App {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "main_fs",
+                entry_point: Some("main_fs"),
                 targets: &[Some(swapchain_format.into())],
                 compilation_options: Default::default(),
             }),
