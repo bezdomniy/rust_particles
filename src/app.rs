@@ -31,9 +31,7 @@ const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 // const MAX_VELOCITY: f32 = 1f32;
 // const MAX_VELOCITY: f32 = 0.1f32;
-// const VISCOSITY: f32 = 0.5f32;
-// const VISCOSITY: f32 = 0.0005;
-const VISCOSITY: f32 = 0.0009765625;
+const INITIAL_VISCOSITY: f32 = 0.9990234375;
 const REPULSE_RADIUS: f32 = 0.25;
 const USE_LINEAR_BVH: bool = false;
 
@@ -50,6 +48,7 @@ struct GameState {
     pub power_slider: Mat4,
     pub r_slider: Mat4,
     pub num_particles: UVec4,
+    pub viscosity: f32,
 }
 
 impl GameState {
@@ -154,7 +153,7 @@ impl GameState {
                     group2_end,
                     self.power_slider.col(i)[j],
                     self.r_slider.col(i)[j],
-                    VISCOSITY,
+                    self.viscosity,
                     aspect_ratio,
                 );
             }
@@ -194,7 +193,7 @@ fn interaction(
         let f = bvh.intersect(p1, radius, g, REPULSE_RADIUS, group2);
 
         p1.vel += f;
-        p1.vel *= viscosity;
+        p1.vel *= 1f32 - viscosity;
 
         // p1.vel = p1.vel.clamp_length_max(MAX_VELOCITY);
 
@@ -286,6 +285,7 @@ impl App {
             //     Vec4::new(1f32, 1f32, 1f32, 1f32),
             // ),
             num_particles,
+            viscosity: INITIAL_VISCOSITY,
         };
 
         // Load the shaders from disk
@@ -649,6 +649,16 @@ impl eframe::App for App {
                                 egui::DragValue::new(&mut self.game_state.r_slider.w_axis.w)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
+                            );
+                            ui.end_row();
+                        });
+                        egui::Grid::new("power_slider").show(ui, |ui| {
+                            ui.label("Viscosity");
+                            ui.end_row();
+                            ui.add(
+                                egui::DragValue::new(&mut self.game_state.viscosity)
+                                    .range(0f32..=1f32)
+                                    .speed(0.00001),
                             );
                             ui.end_row();
                         });
