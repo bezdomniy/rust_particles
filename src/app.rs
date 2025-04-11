@@ -1,6 +1,6 @@
 use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
-use rand::{distributions::Uniform, thread_rng, Rng};
+use rand::{distr::Uniform, rng, Rng};
 use std::{borrow::Cow, f32::EPSILON};
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -76,35 +76,35 @@ impl GameState {
             for _ in start..end {
                 let random_pos = match i {
                     // 0 => Vec2::new(
-                    //     thread_rng().gen_range(-1f32..=0f32),
-                    //     thread_rng().gen_range(0f32..=1f32),
+                    //     rng().random_range(-1f32..=0f32),
+                    //     rng().random_range(0f32..=1f32),
                     // ),
                     // 1 => Vec2::new(
-                    //     thread_rng().gen_range(0f32..=1f32),
-                    //     thread_rng().gen_range(0f32..=1f32),
+                    //     rng().random_range(0f32..=1f32),
+                    //     rng().random_range(0f32..=1f32),
                     // ),
                     // 2 => Vec2::new(
-                    //     thread_rng().gen_range(0f32..=1f32),
-                    //     thread_rng().gen_range(-1f32..=0f32),
+                    //     rng().random_range(0f32..=1f32),
+                    //     rng().random_range(-1f32..=0f32),
                     // ),
                     // 3 => Vec2::new(
-                    //     thread_rng().gen_range(-1f32..=0f32),
-                    //     thread_rng().gen_range(-1f32..=0f32),
+                    //     rng().random_range(-1f32..=0f32),
+                    //     rng().random_range(-1f32..=0f32),
                     // ),
                     _ => Vec2::new(
-                        thread_rng().gen_range(-spread * aspect_ratio..=spread * aspect_ratio),
-                        thread_rng().gen_range(-spread..=spread),
+                        rng().random_range(-spread * aspect_ratio..=spread * aspect_ratio),
+                        rng().random_range(-spread..=spread),
                     ),
                 };
                 let particle = Particle {
                     // pos: Vec2::new(
-                    //     thread_rng().gen_range(-1f32..=1f32),
-                    //     thread_rng().gen_range(-1f32..=1f32),
+                    //     rng().random_range(-1f32..=1f32),
+                    //     rng().random_range(-1f32..=1f32),
                     // ),
                     pos: random_pos,
                     // vel: Vec2::new(
-                    //     thread_rng().gen_range(-0.01f32..=0.01f32),
-                    //     thread_rng().gen_range(-0.01f32..=0.01f32),
+                    //     rng().random_range(-0.01f32..=0.01f32),
+                    //     rng().random_range(-0.01f32..=0.01f32),
                     // ),
                     vel: Vec2::new(0f32, 0f32),
                     cls: i as u32,
@@ -218,7 +218,7 @@ impl App {
         let wgpu_render_state = cc.wgpu_render_state.as_ref().unwrap();
         let device = &wgpu_render_state.device;
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // let power_vals: [f32; 16] = (0..16)
         //     .map(|_| rng.sample(Uniform::new(-0.5f32, 0.5f32)))
@@ -227,14 +227,14 @@ impl App {
         //     .unwrap();
 
         let power_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(-1f32, 1f32)))
+            .map(|_| rng.sample(Uniform::new(-1f32, 1f32).unwrap()))
             // .map(|_| 0f32)
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap();
 
         let r_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(0.01f32, 0.3f32)))
+            .map(|_| rng.sample(Uniform::new(0.01f32, 0.3f32).unwrap()))
             .collect::<Vec<f32>>()
             .try_into()
             .unwrap();

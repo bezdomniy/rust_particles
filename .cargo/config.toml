@@ -4,6 +4,7 @@ rustflags = [
     # "target-feature=+atomics,+bulk-memory,+mutable-globals,+simd128",
     "target-feature=+simd128",
     # "--cfg=web_sys_unstable_apis",
+    '--cfg=getrandom_backend="wasm_js"'
 ]
 
 # [unstable]
@@ -11,3 +12,13 @@ rustflags = [
 
 # [build]
 # target = "aarch64-apple-darwin"
+
+[rust]
+debuginfo-level = 1
+
+[build]
+rustflags = ["-C", "symbol-mangling-version=v0"]
+
+[profile.profiling]
+inherits = "release"
+debug = true
