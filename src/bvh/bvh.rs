@@ -498,7 +498,6 @@ impl Bvh {
         particle: &Particle,
         radius: f32,
         g: f32,
-        repulse_radius: f32,
         particles: &[Particle],
     ) -> Vec2 {
         let mut ret = Vec2::new(0f32, 0f32);
@@ -520,16 +519,13 @@ impl Bvh {
                         if std::ptr::eq(particle, p2) {
                             continue;
                         }
-                        if point_in_circle(p2.pos, radius, particle.pos) {
-                            let d = particle.pos.distance(p2.pos) / radius;
+
+                        let distance = particle.pos.distance(p2.pos);
+                        if distance < radius {
+                            let d = distance / radius;
                             let dir = (p2.pos - particle.pos).normalize_or_zero();
 
-                            let mut f = g * (1f32 - d);
-
-                            if d < repulse_radius {
-                                f += d / (repulse_radius - 1f32)
-                            }
-
+                            let f = g * (1f32 - d);
                             ret += dir * f;
                         }
                     }
@@ -596,11 +592,11 @@ mod tests {
     #[test]
     fn test_radix_sort() {
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         for power in 0..31 {
             let mut vals = (0..1000)
-                .map(|_| rng.gen_range(0..2u32.pow(power)))
+                .map(|_| rng.random_range(0..2u32.pow(power)))
                 .collect::<Vec<_>>();
 
             let mut inp: Vec<MortonPrimitive> = vals

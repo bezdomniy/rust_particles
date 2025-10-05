@@ -30,10 +30,12 @@ const BOUNDS_TOGGLE: bool = true;
 const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 // const MAX_VELOCITY: f32 = 1f32;
-// const MAX_VELOCITY: f32 = 0.1f32;
-const INITIAL_VISCOSITY: f32 = 0.9990234375;
-const REPULSE_RADIUS: f32 = 0.25;
+// const MAX_VELOCITY: f32 = 0.01f32;
+const INITIAL_VISCOSITY: f32 = 0.7;
 const USE_LINEAR_BVH: bool = false;
+
+const MIN_FORCE: f32 = -1f32;
+const MAX_FORCE: f32 = 1f32;
 
 pub struct App {
     game_state: GameState,
@@ -113,7 +115,7 @@ impl GameState {
             }
         }
     }
-    fn update(&mut self, aspect_ratio: f32) {
+    fn update(&mut self, aspect_ratio: f32, dt: f32) {
         for (i, group1_start) in self.particle_offsets.into_iter().enumerate() {
             if group1_start < 0 {
                 continue;
@@ -155,6 +157,7 @@ impl GameState {
                     self.r_slider.col(i)[j],
                     self.viscosity,
                     aspect_ratio,
+                    dt,
                 );
             }
         }
@@ -181,24 +184,25 @@ fn interaction(
     radius: f32,
     viscosity: f32,
     aspect_ratio: f32,
+    dt: f32,
 ) {
-    let group2 = &particles.clone()[group2_start as usize..group2_end];
+    let group2 = &particles[group2_start as usize..group2_end].to_vec();
     let group1 = &mut particles[group1_start as usize..group1_end];
+
     #[cfg(target_arch = "wasm32")]
     let g_iter = group1.iter_mut();
     #[cfg(not(target_arch = "wasm32"))]
     let g_iter = group1.par_iter_mut();
 
     g_iter.for_each(|p1| {
-        let f = bvh.intersect(p1, radius, g, REPULSE_RADIUS, group2);
+        let f = bvh.intersect(p1, radius, g/100f32, group2);
 
-        p1.vel += f;
-        p1.vel *= 1f32 - viscosity;
+        p1.vel += f * dt;
+        p1.vel *= 1f32 - (viscosity * dt);
 
         // p1.vel = p1.vel.clamp_length_max(MAX_VELOCITY);
 
         if BOUNDS_TOGGLE {
-            //not good enough! Need fixing
             if (p1.pos.x >= aspect_ratio) || (p1.pos.x <= -aspect_ratio) {
                 p1.vel.x *= -1f32;
                 p1.pos.x = (aspect_ratio - EPSILON) * p1.pos.x.signum();
@@ -209,7 +213,7 @@ fn interaction(
             }
         }
 
-        p1.pos += p1.vel;
+        p1.pos += p1.vel * dt;
     })
 }
 
@@ -227,7 +231,7 @@ impl App {
         //     .unwrap();
 
         let power_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(-1f32, 1f32).unwrap()))
+            .map(|_| rng.sample(Uniform::new(MIN_FORCE, MAX_FORCE).unwrap()))
             // .map(|_| 0f32)
             .collect::<Vec<f32>>()
             .try_into()
@@ -465,22 +469,22 @@ impl eframe::App for App {
                             ui.label("Red");
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.x_axis.x)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.x_axis.y)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.x_axis.z)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.x_axis.w)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.end_row();
@@ -488,22 +492,22 @@ impl eframe::App for App {
                             ui.label("Green");
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.y_axis.x)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.y_axis.y)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.y_axis.z)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.y_axis.w)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.end_row();
@@ -511,22 +515,22 @@ impl eframe::App for App {
                             ui.label("Blue");
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.z_axis.x)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.z_axis.y)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.z_axis.z)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.z_axis.w)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.end_row();
@@ -534,22 +538,22 @@ impl eframe::App for App {
                             ui.label("White");
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.w_axis.x)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.w_axis.y)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.w_axis.z)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.power_slider.w_axis.w)
-                                    .range(-1f32..=1f32)
+                                    .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.end_row();
@@ -658,7 +662,7 @@ impl eframe::App for App {
                             ui.add(
                                 egui::DragValue::new(&mut self.game_state.viscosity)
                                     .range(0f32..=1f32)
-                                    .speed(0.00001),
+                                    .speed(0.001),
                             );
                             ui.end_row();
                         });
@@ -668,12 +672,14 @@ impl eframe::App for App {
             egui::Frame::canvas(ui.style())
                 .fill(Color32::BLACK)
                 .show(ui, |ui| {
+                    let dt: f32 = ui.input(|i| i.stable_dt);
                     self.game_state
-                        .update(ui.available_width() / ui.available_height());
+                        .update(ui.available_width() / ui.available_height(), dt);
 
                     log::info!(
                         "FPS: {:?}",
-                        1000u128 / self.last_update_inst.elapsed().as_millis()
+                        // 1000u128 / self.last_update_inst.elapsed().as_millis(),
+                        1f32 / dt
                     );
                     self.draw_app(ui);
                     ctx.request_repaint();
