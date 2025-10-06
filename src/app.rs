@@ -46,11 +46,20 @@ pub struct App {
 #[derive(Clone)]
 struct GameState {
     particle_data: Vec<Particle>,
+    particle_cls: Vec<u32>,
     particle_offsets: [i32; 4],
     pub power_slider: Mat4,
     pub r_slider: Mat4,
     pub num_particles: UVec4,
     pub viscosity: f32,
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Ubo {
+    transform: [f32; 16],
+    dt: f32,
+    _padding: [f32; 3],
 }
 
 impl GameState {
@@ -109,9 +118,9 @@ impl GameState {
                     //     rng().random_range(-0.01f32..=0.01f32),
                     // ),
                     vel: Vec2::new(0f32, 0f32),
-                    cls: i as u32,
                 };
                 self.particle_data.push(particle);
+                self.particle_cls.push(i as u32);
             }
         }
     }
@@ -169,7 +178,6 @@ impl GameState {
 pub struct Particle {
     pub pos: Vec2,
     vel: Vec2,
-    cls: u32,
 }
 
 // Interaction between 2 particle groups
@@ -195,7 +203,7 @@ fn interaction(
     let g_iter = group1.par_iter_mut();
 
     g_iter.for_each(|p1| {
-        let f = bvh.intersect(p1, radius, g/100f32, group2);
+        let f = bvh.intersect(p1, radius, g / 100f32, group2);
 
         p1.vel += f * dt;
         p1.vel *= 1f32 - (viscosity * dt);
@@ -255,6 +263,9 @@ impl App {
             particle_data: Vec::with_capacity(
                 (num_particles.x + num_particles.y + num_particles.z + num_particles.w) as usize,
             ),
+            particle_cls: Vec::with_capacity(
+                (num_particles.x + num_particles.y + num_particles.z + num_particles.w) as usize,
+            ),
             particle_offsets: [
                 if num_particles.x > 0 { 0 } else { -1 },
                 if num_particles.y > 0 {
@@ -293,48 +304,26 @@ impl App {
         };
 
         // Load the shaders from disk
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders/compute.wgsl"))),
+        });
+
+        let draw_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders/particles.wgsl"))),
         });
 
-        // Create pipeline layout
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(64),
-                },
-                count: None,
-            }],
-        });
+        let ubo = Ubo {
+            transform: Mat4::IDENTITY.to_cols_array(),
+            dt: 0f32,
+            ..Default::default()
+        };
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let transform = Mat4::IDENTITY;
-        let mx_ref: &[f32; 16] = transform.as_ref();
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
-            contents: bytemuck::cast_slice(mx_ref),
+            contents: bytemuck::bytes_of(&ubo),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        // Create bind group
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
-            label: None,
         });
 
         // let swapchain_format = self.surface.get_supported_formats(&adapter)[0];
@@ -369,25 +358,56 @@ impl App {
             label: Some("Particle Buffer"),
             contents: bytemuck::cast_slice(&game_state.particle_data),
             usage: wgpu::BufferUsages::VERTEX
-                // | wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST,
+                | wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST, //TODO: doesnt need to be COPY_DST - just copy the initial positions at setup
         });
 
-        // // calculates number of work groups from PARTICLES_PER_GROUP constant
-        // let work_group_count =
-        //     ((NUM_PARTICLES as f32) / (PARTICLES_PER_GROUP as f32)).ceil() as u32;
+        let particle_cls_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Particle Buffer"),
+            contents: bytemuck::cast_slice(&game_state.particle_cls),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Compute Pipeline"),
+            layout: None,
+            module: &compute_shader,
+            entry_point: None,
+            compilation_options: Default::default(),
+            cache: Default::default(),
+        });
+
+        let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &compute_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: particle_buffer.as_entire_binding(),
+                },
+            ],
+        });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
-            layout: Some(&pipeline_layout),
+            layout: None,
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &draw_shader,
                 entry_point: Some("main_vs"),
                 buffers: &[
                     wgpu::VertexBufferLayout {
-                        array_stride: 5 * 4,
+                        array_stride: 4 * 4,
                         step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Uint32],
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x4],
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: 1 * 4,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &wgpu::vertex_attr_array![1 => Uint32],
                     },
                     wgpu::VertexBufferLayout {
                         array_stride: 2 * 4,
@@ -398,7 +418,7 @@ impl App {
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &draw_shader,
                 entry_point: Some("main_fs"),
                 targets: &[Some(swapchain_format.into())],
                 compilation_options: Default::default(),
@@ -408,6 +428,17 @@ impl App {
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
             cache: Default::default(),
+        });
+
+        // Create bind group
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            // layout: &bind_group_layout,
+            layout: &render_pipeline.get_bind_group_layout(0),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+            label: None,
         });
 
         wgpu_render_state
@@ -421,6 +452,7 @@ impl App {
                 index_buffer,
                 uniform_buffer,
                 particle_buffer,
+                particle_cls_buffer,
                 vertex_buffer,
             });
 
@@ -742,6 +774,7 @@ struct RenderResources {
     render_pipeline: RenderPipeline,
     uniform_buffer: Buffer,
     particle_buffer: Buffer,
+    particle_cls_buffer: Buffer,
     vertex_buffer: Buffer,
     index_buffer: Buffer,
 }
@@ -753,16 +786,23 @@ impl RenderResources {
         let transform =
             Mat4::orthographic_rh(-aspect_ratio, aspect_ratio, -1f32, 1f32, -1f32, 1f32);
 
-        queue.write_buffer(
-            &self.uniform_buffer,
-            0,
-            bytemuck::cast_slice(&transform.to_cols_array()),
-        );
+        let ubo = Ubo {
+            transform: transform.to_cols_array(),
+            dt: 0f32,
+            ..Default::default()
+        };
+
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&ubo));
 
         queue.write_buffer(
             &self.particle_buffer,
             0,
             bytemuck::cast_slice(game_state.particle_data.as_slice()),
+        );
+        queue.write_buffer(
+            &self.particle_cls_buffer,
+            0,
+            bytemuck::cast_slice(game_state.particle_cls.as_slice()),
         );
     }
 
@@ -771,7 +811,8 @@ impl RenderResources {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
         render_pass.set_vertex_buffer(0, self.particle_buffer.slice(..));
-        render_pass.set_vertex_buffer(1, self.vertex_buffer.slice(..));
+        render_pass.set_vertex_buffer(1, self.particle_cls_buffer.slice(..));
+        render_pass.set_vertex_buffer(2, self.vertex_buffer.slice(..));
         render_pass.draw_indexed(0..6u32, 0, 0..num_particles as u32);
     }
 }
