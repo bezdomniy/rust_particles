@@ -202,6 +202,7 @@ impl GameState {
 }
 
 #[repr(C)]
+#[repr(align(16))]
 #[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Particle {
     pub pos: Vec2,

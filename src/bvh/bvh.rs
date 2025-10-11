@@ -17,7 +17,7 @@ enum SplitMethod {
     Sah,
 }
 
-// #[repr(align(64))]
+#[repr(align(64))]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct NodeInner {
     pub centre: Vec2,
@@ -26,7 +26,7 @@ pub struct NodeInner {
     pub prim_idx2: u32,
 }
 
-// #[repr(align(16))]
+#[repr(align(16))]
 #[derive(Debug, Default, Copy, Clone)]
 struct AABB {
     first: Vec2,
@@ -190,7 +190,7 @@ impl Bvh {
         if linear {
             Bvh::build_linear(&mut object_inner_nodes, particles, radius);
         } else {
-            let split_method = SplitMethod::Middle;
+            let split_method = SplitMethod::EqualCounts;
 
             Bvh::recursive_build(
                 &mut object_inner_nodes,
