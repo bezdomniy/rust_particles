@@ -1,7 +1,11 @@
+use clap::Parser;
 use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distr::Uniform, rng, Rng};
 use std::{borrow::Cow, f32::EPSILON};
+
+use serde::{Deserialize, Serialize};
+use std::fs;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -37,10 +41,58 @@ const USE_LINEAR_BVH: bool = false;
 const MIN_FORCE: f32 = -1f32;
 const MAX_FORCE: f32 = 1f32;
 
+/// A wgpu ray tracer
+#[derive(Parser, Debug, Default)]
+#[clap(about, author)]
+pub struct Args {
+    #[clap(short, long)]
+    reload_params: bool,
+}
+
 pub struct App {
     game_state: GameState,
     last_update_inst: Instant,
     _target_frame_time: Duration,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct InitialParams {
+    power: [f32; 16],
+    radius: [f32; 16],
+    num_particles: [u32; 4],
+    viscosity: f32,
+}
+
+impl Default for InitialParams {
+    fn default() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let num_particles = UVec4::new(10000, 10000, 10000, 10000);
+
+        let mut rng = rng();
+
+        let power_vals: [f32; 16] = (0..16)
+            .map(|_| rng.sample(Uniform::new(MIN_FORCE, MAX_FORCE).unwrap()))
+            // .map(|_| 0f32)
+            .collect::<Vec<f32>>()
+            .try_into()
+            .unwrap();
+
+        let r_vals: [f32; 16] = (0..16)
+            .map(|_| rng.sample(Uniform::new(0.01f32, 0.3f32).unwrap()))
+            .collect::<Vec<f32>>()
+            .try_into()
+            .unwrap();
+
+        Self {
+            power: power_vals,
+            radius: r_vals,
+            viscosity: INITIAL_VISCOSITY,
+            num_particles: num_particles.into(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -86,37 +138,13 @@ impl GameState {
 
             for _ in start..end {
                 let random_pos = match i {
-                    // 0 => Vec2::new(
-                    //     rng().random_range(-1f32..=0f32),
-                    //     rng().random_range(0f32..=1f32),
-                    // ),
-                    // 1 => Vec2::new(
-                    //     rng().random_range(0f32..=1f32),
-                    //     rng().random_range(0f32..=1f32),
-                    // ),
-                    // 2 => Vec2::new(
-                    //     rng().random_range(0f32..=1f32),
-                    //     rng().random_range(-1f32..=0f32),
-                    // ),
-                    // 3 => Vec2::new(
-                    //     rng().random_range(-1f32..=0f32),
-                    //     rng().random_range(-1f32..=0f32),
-                    // ),
                     _ => Vec2::new(
                         rng().random_range(-spread * aspect_ratio..=spread * aspect_ratio),
                         rng().random_range(-spread..=spread),
                     ),
                 };
                 let particle = Particle {
-                    // pos: Vec2::new(
-                    //     rng().random_range(-1f32..=1f32),
-                    //     rng().random_range(-1f32..=1f32),
-                    // ),
                     pos: random_pos,
-                    // vel: Vec2::new(
-                    //     rng().random_range(-0.01f32..=0.01f32),
-                    //     rng().random_range(-0.01f32..=0.01f32),
-                    // ),
                     vel: Vec2::new(0f32, 0f32),
                 };
                 self.particle_data.push(particle);
@@ -227,79 +255,58 @@ fn interaction(
 
 impl App {
     pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Self {
+        let args = Args::parse();
+
+        let mut initial_params = InitialParams::default();
+        if args.reload_params {
+            let initial_params_json =
+                fs::read_to_string("last_run.json").expect("Failed to read params from file");
+            initial_params = serde_json::from_str(&initial_params_json)
+                .expect("Failed to deserialize initial params");
+            log::info!("Reloaded params: {:?}", initial_params);
+        } else {
+            let initial_params_json = serde_json::to_string_pretty(&initial_params)
+                .expect("Failed to serialize initial params");
+            fs::write("last_run.json", initial_params_json)
+                .expect("Failed to write params to file");
+            log::info!("Saved params: {:?}", initial_params);
+        }
+
         let wgpu_render_state = cc.wgpu_render_state.as_ref().unwrap();
         let device = &wgpu_render_state.device;
 
-        let mut rng = rand::rng();
-
-        // let power_vals: [f32; 16] = (0..16)
-        //     .map(|_| rng.sample(Uniform::new(-0.5f32, 0.5f32)))
-        //     .collect::<Vec<f32>>()
-        //     .try_into()
-        //     .unwrap();
-
-        let power_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(MIN_FORCE, MAX_FORCE).unwrap()))
-            // .map(|_| 0f32)
-            .collect::<Vec<f32>>()
-            .try_into()
-            .unwrap();
-
-        let r_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(0.01f32, 0.3f32).unwrap()))
-            .collect::<Vec<f32>>()
-            .try_into()
-            .unwrap();
-
-        #[cfg(target_arch = "wasm32")]
-        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
-
-        #[cfg(not(target_arch = "wasm32"))]
-        // let num_particles = UVec4::new(5000, 5000, 5000, 5000);
-        // let num_particles = UVec4::new(50, 50, 50, 50);
-        let num_particles = UVec4::new(10000, 10000, 10000, 10000);
+        let total_particles: u32 = initial_params.num_particles.iter().sum();
 
         let mut game_state = GameState {
-            particle_data: Vec::with_capacity(
-                (num_particles.x + num_particles.y + num_particles.z + num_particles.w) as usize,
-            ),
-            particle_cls: Vec::with_capacity(
-                (num_particles.x + num_particles.y + num_particles.z + num_particles.w) as usize,
-            ),
+            particle_data: Vec::with_capacity(total_particles as usize),
+            particle_cls: Vec::with_capacity(total_particles as usize),
             particle_offsets: [
-                if num_particles.x > 0 { 0 } else { -1 },
-                if num_particles.y > 0 {
-                    num_particles.x as i32
+                if initial_params.num_particles[0] > 0 {
+                    0
                 } else {
                     -1
                 },
-                if num_particles.z > 0 {
-                    (num_particles.x + num_particles.y) as i32
+                if initial_params.num_particles[1] > 0 {
+                    initial_params.num_particles[0] as i32
                 } else {
                     -1
                 },
-                if num_particles.w > 0 {
-                    (num_particles.x + num_particles.y + num_particles.z) as i32
+                if initial_params.num_particles[2] > 0 {
+                    (initial_params.num_particles[0] + initial_params.num_particles[1]) as i32
+                } else {
+                    -1
+                },
+                if initial_params.num_particles[3] > 0 {
+                    (initial_params.num_particles[0]
+                        + initial_params.num_particles[1]
+                        + initial_params.num_particles[2]) as i32
                 } else {
                     -1
                 },
             ],
-            power_slider: Mat4::from_cols_array(&power_vals),
-            r_slider: Mat4::from_cols_array(&r_vals),
-            // power_slider: Mat4::from_cols(
-            //     Vec4::new(1f32, 1f32, -10f32, 10f32),
-            //     Vec4::new(-20f32, 10f32, 10f32, 1f32),
-            //     Vec4::new(10f32, 1f32, 10f32, 10f32),
-            //     Vec4::new(1f32, -10f32, 10f32, 10f32),
-            // ),
-
-            // r_slider: Mat4::from_cols(
-            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
-            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
-            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
-            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
-            // ),
-            num_particles,
+            power_slider: Mat4::from_cols_array(&initial_params.power),
+            r_slider: Mat4::from_cols_array(&initial_params.radius),
+            num_particles: initial_params.num_particles.into(),
             viscosity: INITIAL_VISCOSITY,
         };
 

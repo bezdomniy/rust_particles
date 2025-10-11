@@ -16,6 +16,7 @@ enum SplitMethod {
     Sah,
 }
 
+// #[repr(align(64))]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct NodeInner {
     pub centre: Vec2,
@@ -24,6 +25,7 @@ pub struct NodeInner {
     pub prim_idx2: u32,
 }
 
+// #[repr(align(16))]
 #[derive(Debug, Default, Copy, Clone)]
 struct AABB {
     first: Vec2,
@@ -37,9 +39,10 @@ fn point_in_circle(centre: Vec2, radius: f32, point: Vec2) -> bool {
     // return square_dist <= radius ** 2
 }
 
+#[repr(align(16))]
 #[derive(Debug, Default, Copy, Clone)]
 struct MortonPrimitive {
-    primitive_index: usize,
+    primitive_index: u32,
     morton_code: u32,
 }
 
@@ -60,8 +63,8 @@ fn radix_sort(inp: &mut Vec<MortonPrimitive>) -> Vec<MortonPrimitive> {
         let mut bucket_count = [0; N_BUCKETS];
 
         inp.iter().for_each(|morton_primitive| {
-            let bucket = ((morton_primitive.morton_code >> low_bit) & BIT_MASK) as usize;
-            bucket_count[bucket] += 1;
+            let bucket = ((morton_primitive.morton_code >> low_bit) & BIT_MASK) as u32;
+            bucket_count[bucket as usize] += 1;
         });
 
         let mut out_index = [0; N_BUCKETS];
@@ -201,7 +204,7 @@ impl Bvh {
                 let centroid_offset = bounds.offset(&particles[i].pos);
                 let offset = centroid_offset * MORTON_SCALE;
                 MortonPrimitive {
-                    primitive_index: i,
+                    primitive_index: i as u32,
                     morton_code: encode_morton_3(Vec3::new(offset.x, offset.y, 0f32)),
                 }
             })
@@ -216,7 +219,7 @@ impl Bvh {
         // let particles: Vec<Particle> = particles.iter().map(|p| p.clone()).collect();
         let ordered_particles = morton_primitives
             .iter()
-            .map(|mp| particles[mp.primitive_index])
+            .map(|mp| particles[mp.primitive_index as usize])
             .collect_vec();
 
         particles.copy_from_slice(&ordered_particles);
@@ -603,7 +606,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, val)| MortonPrimitive {
-                    primitive_index: i,
+                    primitive_index: i as u32,
                     morton_code: *val,
                 })
                 .collect();
