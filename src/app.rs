@@ -250,21 +250,24 @@ fn interaction(
 
 impl App {
     pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Self {
-        let args = Args::parse();
-
         let mut initial_params = InitialParams::default();
-        if args.reload_params {
-            let initial_params_json =
-                fs::read_to_string("last_run.json").expect("Failed to read params from file");
-            initial_params = serde_json::from_str(&initial_params_json)
-                .expect("Failed to deserialize initial params");
-            log::info!("Reloaded params: {:?}", initial_params);
-        } else {
-            let initial_params_json = serde_json::to_string_pretty(&initial_params)
-                .expect("Failed to serialize initial params");
-            fs::write("last_run.json", initial_params_json)
-                .expect("Failed to write params to file");
-            log::info!("Saved params: {:?}", initial_params);
+        if !cfg!(target_arch = "wasm32") {
+            let args = Args::parse();
+
+            if args.reload_params {
+                let initial_params_json =
+                    fs::read_to_string("last_run.json").expect("Failed to read params from file");
+                initial_params = serde_json::from_str(&initial_params_json)
+                    .expect("Failed to deserialize initial params");
+                log::info!("Reloaded params: {:?}", initial_params);
+            } else {
+                let initial_params_json = serde_json::to_string_pretty(&initial_params)
+                    .expect("Failed to serialize initial params");
+
+                fs::write("last_run.json", initial_params_json)
+                    .expect("Failed to write params to file");
+                log::info!("Saved params: {:?}", initial_params);
+            }
         }
 
         let wgpu_render_state = cc.wgpu_render_state.as_ref().unwrap();
