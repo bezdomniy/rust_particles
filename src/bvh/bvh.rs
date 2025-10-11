@@ -1,6 +1,5 @@
 use glam::{Vec2, Vec3};
 use itertools::{partition, Itertools};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::f32::{consts::PI, INFINITY, NEG_INFINITY};
 
 use super::super::app::Particle;
@@ -221,7 +220,6 @@ impl Bvh {
         const MORTON_SCALE: f32 = (1 << MORTON_BITS) as f32;
 
         let mut morton_primitives = (0..particles.len())
-            .into_par_iter()
             .map(|i| {
                 let centroid_offset = bounds.offset(&particles[i].pos);
                 let offset = centroid_offset * MORTON_SCALE;
