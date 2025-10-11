@@ -1,5 +1,6 @@
 use glam::{Vec2, Vec3};
 use itertools::{partition, Itertools};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use std::f32::{consts::PI, INFINITY, NEG_INFINITY};
 
 use super::super::app::Particle;
@@ -82,6 +83,7 @@ fn radix_sort(inp: &mut Vec<MortonPrimitive>) -> Vec<MortonPrimitive> {
     out
 }
 
+#[inline]
 fn left_shift_3(inp: u32) -> u32 {
     let mut x = inp;
 
@@ -93,6 +95,25 @@ fn left_shift_3(inp: u32) -> u32 {
     x = (x | (x << 4)) & 0b00000011000011000011000011000011;
     x = (x | (x << 2)) & 0b00001001001001001001001001001001;
     x
+}
+
+#[inline]
+fn left_shift_2(mut x: u32) -> u32 {
+    // Clamp range if you only want 16 bits (like 3D version clamps to 10 bits)
+    if x == (1 << 16) {
+        x -= 1;
+    }
+
+    // progressively spread bits apart by inserting 1 zero between them
+    x = (x | (x << 8)) & 0b00000000111111110000000011111111;
+    x = (x | (x << 4)) & 0b00001111000011110000111100001111;
+    x = (x | (x << 2)) & 0b00110011001100110011001100110011;
+    x = (x | (x << 1)) & 0b01010101010101010101010101010101;
+    x
+}
+
+fn encode_morton_2(inp: Vec2) -> u32 {
+    (left_shift_2(inp.y as u32) << 1) | left_shift_2(inp.x as u32)
 }
 
 fn encode_morton_3(inp: Vec3) -> u32 {
@@ -169,7 +190,7 @@ impl Bvh {
         if linear {
             Bvh::build_linear(&mut object_inner_nodes, particles, radius);
         } else {
-            let split_method = SplitMethod::Sah;
+            let split_method = SplitMethod::Middle;
 
             Bvh::recursive_build(
                 &mut object_inner_nodes,
@@ -189,7 +210,7 @@ impl Bvh {
 
     fn build_linear(
         bounding_circles: &mut Vec<NodeInner>,
-        particles: &mut [Particle],
+        particles: &[Particle],
         radius: f32,
     ) -> u32 {
         let bounds = particles.iter().fold(AABB::empty(), |acc, new| {
@@ -200,15 +221,16 @@ impl Bvh {
         const MORTON_SCALE: f32 = (1 << MORTON_BITS) as f32;
 
         let mut morton_primitives = (0..particles.len())
+            .into_par_iter()
             .map(|i| {
                 let centroid_offset = bounds.offset(&particles[i].pos);
                 let offset = centroid_offset * MORTON_SCALE;
                 MortonPrimitive {
                     primitive_index: i as u32,
-                    morton_code: encode_morton_3(Vec3::new(offset.x, offset.y, 0f32)),
+                    morton_code: encode_morton_3(Vec3::new(offset.x, offset.y, 0.0)),
                 }
             })
-            .collect_vec();
+            .collect();
 
         morton_primitives = radix_sort(&mut morton_primitives);
 
@@ -222,11 +244,9 @@ impl Bvh {
             .map(|mp| particles[mp.primitive_index as usize])
             .collect_vec();
 
-        particles.copy_from_slice(&ordered_particles);
-
         Bvh::emit_lbvh(
             morton_primitives.as_mut_slice(),
-            particles,
+            ordered_particles.as_slice(),
             bounding_circles,
             radius,
             0,
