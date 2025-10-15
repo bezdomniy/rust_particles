@@ -2,13 +2,10 @@ use clap::Parser;
 use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distr::Uniform, rng, Rng};
-use std::{borrow::Cow, f32::EPSILON};
+use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-
-#[cfg(not(target_arch = "wasm32"))]
-use rayon::prelude::*;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
@@ -30,7 +27,6 @@ use eframe::{
 use crate::bvh::Bvh;
 
 const FRAMERATE: u32 = 30;
-const BOUNDS_TOGGLE: bool = true;
 const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 // const MAX_VELOCITY: f32 = 1f32;
@@ -163,33 +159,38 @@ impl GameState {
                 .into_iter()
                 .skip(i + 1)
                 .find(|&item| item > 0)
-                .unwrap_or(self.particle_data.len() as i32) as usize;
+                .unwrap_or(self.particle_data.len() as i32);
 
             for (j, group2_start) in self.particle_offsets.into_iter().enumerate() {
                 if group2_start < 0 {
                     continue;
                 }
 
-                let group2_end =
-                    self.particle_offsets
-                        .into_iter()
-                        .skip(j + 1)
-                        .find(|&item| item > 0)
-                        .unwrap_or(self.particle_data.len() as i32) as usize;
+                let group2_end = self
+                    .particle_offsets
+                    .into_iter()
+                    .skip(j + 1)
+                    .find(|&item| item > 0)
+                    .unwrap_or(self.particle_data.len() as i32);
 
-                let bvh = Bvh::new(
-                    &mut self.particle_data[group2_start as usize..group2_end],
-                    self.radius_slider.col(i)[j],
-                    USE_LINEAR_BVH,
-                );
+                let ptr = self.particle_data.as_mut_ptr();
+                let group1 = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        ptr.add(group1_start as usize),
+                        (group1_end - group1_start) as usize,
+                    )
+                };
+                let group2 = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        ptr.add(group2_start as usize),
+                        (group2_end - group2_start) as usize,
+                    )
+                };
 
-                let group2 = &self.particle_data.clone()[group2_start as usize..group2_end];
-                let group1 = &mut self.particle_data[group1_start as usize..group1_end];
+                let bvh = Bvh::new(group2, self.radius_slider.col(i)[j], USE_LINEAR_BVH);
 
-                interaction(
-                    &bvh,
+                bvh.interaction(
                     group1,
-                    group2,
                     self.power_slider.col(i)[j],
                     self.radius_slider.col(i)[j],
                     self.viscosity,
@@ -206,46 +207,7 @@ impl GameState {
 #[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Particle {
     pub pos: Vec2,
-    vel: Vec2,
-}
-
-// Interaction between 2 particle groups
-fn interaction(
-    bvh: &Bvh,
-    group1: &mut [Particle],
-    group2: &[Particle],
-    g: f32,
-    radius: f32,
-    viscosity: f32,
-    aspect_ratio: f32,
-    dt: f32,
-) {
-    #[cfg(target_arch = "wasm32")]
-    let g_iter = group1.iter_mut();
-    #[cfg(not(target_arch = "wasm32"))]
-    let g_iter = group1.par_iter_mut();
-
-    g_iter.for_each(|p1| {
-        let f = bvh.intersect(p1, radius, g / 100f32, group2);
-
-        p1.vel += f * dt;
-        p1.vel *= 1f32 - (viscosity * dt);
-
-        // p1.vel = p1.vel.clamp_length_max(MAX_VELOCITY);
-
-        if BOUNDS_TOGGLE {
-            if (p1.pos.x >= aspect_ratio) || (p1.pos.x <= -aspect_ratio) {
-                p1.vel.x *= -1f32;
-                p1.pos.x = (aspect_ratio - EPSILON) * p1.pos.x.signum();
-            }
-            if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
-                p1.vel.y *= -1f32;
-                p1.pos.y = 1f32 * p1.pos.y.signum();
-            }
-        }
-
-        p1.pos += p1.vel * dt;
-    })
+    pub vel: Vec2,
 }
 
 impl App {

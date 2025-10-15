@@ -1,12 +1,19 @@
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 use glam::{Vec2, Vec3};
 use itertools::{partition, Itertools};
 use std::f32::{consts::PI, INFINITY, NEG_INFINITY};
 
 use super::super::app::Particle;
+use std::f32::EPSILON;
 
 static MAX_SHAPES_IN_NODE: usize = 4;
 
-pub struct Bvh(pub Vec<NodeInner>);
+pub struct Bvh<'a> {
+    nodes: Vec<NodeInner>,
+    particles: &'a [Particle],
+}
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
@@ -19,10 +26,10 @@ enum SplitMethod {
 #[repr(align(64))]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct NodeInner {
-    pub centre: Vec2,
-    pub radius: f32,
-    pub skip_ptr_or_prim_idx1: u32,
-    pub prim_idx2: u32,
+    centre: Vec2,
+    radius: f32,
+    skip_ptr_or_prim_idx1: u32,
+    prim_idx2: u32,
 }
 
 #[repr(align(16))]
@@ -177,12 +184,50 @@ impl NodeInner {
     }
 }
 
-impl Bvh {
-    pub fn empty() -> Self {
-        Bvh(vec![])
+impl<'a> Bvh<'a> {
+    pub fn empty(particles: &'a [Particle]) -> Self {
+        Bvh {
+            nodes: vec![],
+            particles,
+        }
     }
 
-    pub fn new(particles: &mut [Particle], radius: f32, linear: bool) -> Self {
+    pub fn interaction(
+        &self,
+        group1: &mut [Particle],
+        g: f32,
+        radius: f32,
+        viscosity: f32,
+        aspect_ratio: f32,
+        dt: f32,
+    ) {
+        #[cfg(target_arch = "wasm32")]
+        let g_iter = group1.iter_mut();
+        #[cfg(not(target_arch = "wasm32"))]
+        let g_iter = group1.par_iter_mut();
+
+        g_iter.for_each(|p1| {
+            let f = self.intersect(p1, radius, g / 100f32, self.particles);
+
+            p1.vel += f * dt;
+            p1.vel *= 1f32 - (viscosity * dt);
+
+            // p1.vel = p1.vel.clamp_length_max(MAX_VELOCITY);
+
+            if (p1.pos.x >= aspect_ratio) || (p1.pos.x <= -aspect_ratio) {
+                p1.vel.x *= -1f32;
+                p1.pos.x = (aspect_ratio - EPSILON) * p1.pos.x.signum();
+            }
+            if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
+                p1.vel.y *= -1f32;
+                p1.pos.y = 1f32 * p1.pos.y.signum();
+            }
+
+            p1.pos += p1.vel * dt;
+        })
+    }
+
+    pub fn new(particles: &'a mut [Particle], radius: f32, linear: bool) -> Self {
         let mut object_inner_nodes: Vec<NodeInner> =
             Vec::with_capacity(particles.len().next_power_of_two());
 
@@ -202,12 +247,16 @@ impl Bvh {
         }
 
         if object_inner_nodes.is_empty() {
-            return Bvh::empty();
+            return Bvh::empty(particles);
         }
-        Bvh(object_inner_nodes)
+
+        Bvh {
+            nodes: object_inner_nodes,
+            particles,
+        }
     }
 
-    fn build_linear(
+    pub fn build_linear(
         bounding_circles: &mut Vec<NodeInner>,
         particles: &[Particle],
         radius: f32,
@@ -514,22 +563,16 @@ impl Bvh {
         bounding_circles.len() as u32
     }
 
-    pub fn intersect(
-        &self,
-        particle: &Particle,
-        radius: f32,
-        g: f32,
-        particles: &[Particle],
-    ) -> Vec2 {
+    fn intersect(&self, particle: &Particle, radius: f32, g: f32, particles: &[Particle]) -> Vec2 {
         let mut ret = Vec2::new(0f32, 0f32);
 
         let mut idx = 0;
         loop {
-            if idx >= self.0.len() {
+            if idx >= self.nodes.len() {
                 break;
             };
 
-            let current_node = &self.0[idx];
+            let current_node = &self.nodes[idx];
 
             let leaf_node: bool = current_node.prim_idx2 > 0u32;
 
