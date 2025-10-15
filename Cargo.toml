@@ -40,7 +40,6 @@ wgpu = { version = "27.0", default-features = false, features = ["webgl"] }
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3.70"
 getrandom = { version = "0.3", features = ["wasm_js"] }
-instant = { version = "0.1", features = ["wasm-bindgen"] }
 
 [profile.release]
 debug = true

@@ -6,15 +6,11 @@ use std::{
     borrow::Cow,
     sync::{Arc, Mutex},
 };
+use wgpu::ComputePipeline;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{Duration, Instant};
-
-#[cfg(target_arch = "wasm32")]
-use instant::{Duration, Instant};
 // #[cfg(target_arch = "wasm32")]
 // pub use wasm_bindgen_rayon::init_thread_pool;
 
@@ -29,7 +25,6 @@ use eframe::{
 
 use crate::bvh::Bvh;
 
-const FRAMERATE: u32 = 30;
 const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 // const MAX_VELOCITY: f32 = 1f32;
@@ -50,8 +45,6 @@ pub struct Args {
 
 pub struct App {
     game_state: Arc<Mutex<GameState>>,
-    last_update_inst: Instant,
-    _target_frame_time: Duration,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -60,6 +53,33 @@ struct InitialParams {
     radius: [f32; 16],
     num_particles: [u32; 4],
     viscosity: f32,
+}
+
+#[derive(Clone)]
+struct GameState {
+    particle_data: Vec<Particle>,
+    particle_cls: Vec<u32>,
+    particle_offsets: [i32; 4],
+    pub power_slider: Mat4,
+    pub radius_slider: Mat4,
+    pub num_particles: UVec4,
+    pub viscosity: f32,
+}
+
+#[repr(C)]
+#[repr(align(16))]
+#[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Particle {
+    pub pos: Vec2,
+    pub vel: Vec2,
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Ubo {
+    transform: [f32; 16],
+    dt: f32,
+    _padding: [f32; 3],
 }
 
 impl Default for InitialParams {
@@ -94,25 +114,6 @@ impl Default for InitialParams {
     }
 }
 
-#[derive(Clone)]
-struct GameState {
-    particle_data: Vec<Particle>,
-    particle_cls: Vec<u32>,
-    particle_offsets: [i32; 4],
-    pub power_slider: Mat4,
-    pub radius_slider: Mat4,
-    pub num_particles: UVec4,
-    pub viscosity: f32,
-}
-
-#[repr(C)]
-#[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Ubo {
-    transform: [f32; 16],
-    dt: f32,
-    _padding: [f32; 3],
-}
-
 impl GameState {
     fn init_particles(&mut self) {
         let spread = 0.8f32;
@@ -142,6 +143,12 @@ impl GameState {
                         rng().random_range(-spread..=spread),
                     ),
                 };
+                // let random_vel = match i {
+                //     _ => Vec2::new(
+                //         rng().random_range(-10.1..=10.1),
+                //         rng().random_range(-10.1..=10.1),
+                //     ),
+                // };
                 let particle = Particle {
                     pos: random_pos,
                     vel: Vec2::new(0f32, 0f32),
@@ -203,14 +210,6 @@ impl GameState {
             }
         }
     }
-}
-
-#[repr(C)]
-#[repr(align(16))]
-#[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Particle {
-    pub pos: Vec2,
-    pub vel: Vec2,
 }
 
 impl App {
@@ -419,6 +418,8 @@ impl App {
             .insert(RenderResources {
                 render_bind_group: bind_group,
                 render_pipeline,
+                compute_bind_group,
+                compute_pipeline,
                 index_buffer,
                 uniform_buffer,
                 particle_buffer,
@@ -428,8 +429,6 @@ impl App {
 
         Self {
             game_state: Arc::from(Mutex::from(game_state)),
-            last_update_inst: Instant::now(),
-            _target_frame_time: Duration::from_secs_f64(1.0 / FRAMERATE as f64),
         }
 
         // self.config = Some(wgpu::SurfaceConfiguration {
@@ -676,16 +675,12 @@ impl eframe::App for App {
                 .fill(Color32::BLACK)
                 .show(ui, |ui| {
                     let dt: f32 = ui.input(|i| i.stable_dt);
-                    self.game_state
-                        .lock()
-                        .unwrap()
-                        .update(ui.available_width() / ui.available_height(), dt);
+                    // self.game_state
+                    //     .lock()
+                    //     .unwrap()
+                    //     .update(ui.available_width() / ui.available_height(), dt);
 
-                    log::info!(
-                        "FPS: {:?}",
-                        // 1000u128 / self.last_update_inst.elapsed().as_millis(),
-                        1f32 / dt
-                    );
+                    log::info!("FPS: {:?}", 1f32 / dt);
                     self.draw_app(ui);
                     ctx.request_repaint();
                 })
@@ -703,10 +698,27 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         screen_descriptor: &ScreenDescriptor,
-        _egui_encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let resources: &RenderResources = resources.get().unwrap();
+
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("Update particles"),
+            ..Default::default()
+        });
+        cpass.set_pipeline(&resources.compute_pipeline);
+        cpass.set_bind_group(0, &resources.compute_bind_group, &[]);
+
+        let num_dispatches = self
+            .game_state
+            .lock()
+            .unwrap()
+            .particle_data
+            .len()
+            .div_ceil(64) as u32;
+        cpass.dispatch_workgroups(num_dispatches, 1, 1);
+
         resources.prepare(
             device,
             queue,
@@ -740,13 +752,14 @@ impl App {
                 game_state: self.game_state.clone(),
             },
         ));
-        self.last_update_inst = Instant::now();
     }
 }
 
 struct RenderResources {
     render_bind_group: BindGroup,
     render_pipeline: RenderPipeline,
+    compute_bind_group: BindGroup,
+    compute_pipeline: ComputePipeline,
     uniform_buffer: Buffer,
     particle_buffer: Buffer,
     particle_cls_buffer: Buffer,
@@ -769,24 +782,24 @@ impl RenderResources {
 
         let ubo = Ubo {
             transform: transform.to_cols_array(),
-            dt: 0f32,
+            dt: 0f32, //TODO - set this
             ..Default::default()
         };
 
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&ubo));
 
-        let game_state = game_state_ref.lock().unwrap();
+        // let game_state = game_state_ref.lock().unwrap();
 
-        queue.write_buffer(
-            &self.particle_buffer,
-            0,
-            bytemuck::cast_slice(game_state.particle_data.as_slice()),
-        );
-        queue.write_buffer(
-            &self.particle_cls_buffer,
-            0,
-            bytemuck::cast_slice(game_state.particle_cls.as_slice()),
-        );
+        // queue.write_buffer(
+        //     &self.particle_buffer,
+        //     0,
+        //     bytemuck::cast_slice(game_state.particle_data.as_slice()),
+        // );
+        // queue.write_buffer(
+        //     &self.particle_cls_buffer,
+        //     0,
+        //     bytemuck::cast_slice(game_state.particle_cls.as_slice()),
+        // );
     }
 
     fn paint(&self, render_pass: &mut RenderPass<'_>, num_particles: usize) {
