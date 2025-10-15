@@ -2,7 +2,10 @@ use clap::Parser;
 use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distr::Uniform, rng, Rng};
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    sync::{Arc, Mutex},
+};
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -46,7 +49,7 @@ pub struct Args {
 }
 
 pub struct App {
-    game_state: GameState,
+    game_state: Arc<Mutex<GameState>>,
     last_update_inst: Instant,
     _target_frame_time: Duration,
 }
@@ -424,7 +427,7 @@ impl App {
             });
 
         Self {
-            game_state,
+            game_state: Arc::from(Mutex::from(game_state)),
             last_update_inst: Instant::now(),
             _target_frame_time: Duration::from_secs_f64(1.0 / FRAMERATE as f64),
         }
@@ -457,6 +460,7 @@ impl eframe::App for App {
                 .default_open(false)
                 .show(ctx, |ui| {
                     ui.horizontal_top(|ui| {
+                        let mut game_state = self.game_state.lock().unwrap();
                         egui::Grid::new("power_slider").show(ui, |ui| {
                             ui.label("Power");
                             ui.label("Red");
@@ -467,22 +471,22 @@ impl eframe::App for App {
 
                             ui.label("Red");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.x)
+                                egui::DragValue::new(&mut game_state.power_slider.x_axis.x)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.y)
+                                egui::DragValue::new(&mut game_state.power_slider.x_axis.y)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.z)
+                                egui::DragValue::new(&mut game_state.power_slider.x_axis.z)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.w)
+                                egui::DragValue::new(&mut game_state.power_slider.x_axis.w)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
@@ -490,22 +494,22 @@ impl eframe::App for App {
 
                             ui.label("Green");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.x)
+                                egui::DragValue::new(&mut game_state.power_slider.y_axis.x)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.y)
+                                egui::DragValue::new(&mut game_state.power_slider.y_axis.y)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.z)
+                                egui::DragValue::new(&mut game_state.power_slider.y_axis.z)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.w)
+                                egui::DragValue::new(&mut game_state.power_slider.y_axis.w)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
@@ -513,22 +517,22 @@ impl eframe::App for App {
 
                             ui.label("Blue");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.x)
+                                egui::DragValue::new(&mut game_state.power_slider.z_axis.x)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.y)
+                                egui::DragValue::new(&mut game_state.power_slider.z_axis.y)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.z)
+                                egui::DragValue::new(&mut game_state.power_slider.z_axis.z)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.w)
+                                egui::DragValue::new(&mut game_state.power_slider.z_axis.w)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
@@ -536,22 +540,22 @@ impl eframe::App for App {
 
                             ui.label("White");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.x)
+                                egui::DragValue::new(&mut game_state.power_slider.w_axis.x)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.y)
+                                egui::DragValue::new(&mut game_state.power_slider.w_axis.y)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.z)
+                                egui::DragValue::new(&mut game_state.power_slider.w_axis.z)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.w)
+                                egui::DragValue::new(&mut game_state.power_slider.w_axis.w)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
@@ -566,22 +570,22 @@ impl eframe::App for App {
                             ui.end_row();
                             ui.label("Red");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.x_axis.x)
+                                egui::DragValue::new(&mut game_state.radius_slider.x_axis.x)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.x_axis.y)
+                                egui::DragValue::new(&mut game_state.radius_slider.x_axis.y)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.x_axis.z)
+                                egui::DragValue::new(&mut game_state.radius_slider.x_axis.z)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.x_axis.w)
+                                egui::DragValue::new(&mut game_state.radius_slider.x_axis.w)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
@@ -589,44 +593,44 @@ impl eframe::App for App {
 
                             ui.label("Green");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.y_axis.x)
+                                egui::DragValue::new(&mut game_state.radius_slider.y_axis.x)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.y_axis.y)
+                                egui::DragValue::new(&mut game_state.radius_slider.y_axis.y)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.y_axis.z)
+                                egui::DragValue::new(&mut game_state.radius_slider.y_axis.z)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.y_axis.w)
+                                egui::DragValue::new(&mut game_state.radius_slider.y_axis.w)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.end_row();
                             ui.label("Blue");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.z_axis.x)
+                                egui::DragValue::new(&mut game_state.radius_slider.z_axis.x)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.z_axis.y)
+                                egui::DragValue::new(&mut game_state.radius_slider.z_axis.y)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.z_axis.z)
+                                egui::DragValue::new(&mut game_state.radius_slider.z_axis.z)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.z_axis.w)
+                                egui::DragValue::new(&mut game_state.radius_slider.z_axis.w)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
@@ -634,22 +638,22 @@ impl eframe::App for App {
 
                             ui.label("White");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.w_axis.x)
+                                egui::DragValue::new(&mut game_state.radius_slider.w_axis.x)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.w_axis.y)
+                                egui::DragValue::new(&mut game_state.radius_slider.w_axis.y)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.w_axis.z)
+                                egui::DragValue::new(&mut game_state.radius_slider.w_axis.z)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.radius_slider.w_axis.w)
+                                egui::DragValue::new(&mut game_state.radius_slider.w_axis.w)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
@@ -659,7 +663,7 @@ impl eframe::App for App {
                             ui.label("Viscosity");
                             ui.end_row();
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.viscosity)
+                                egui::DragValue::new(&mut game_state.viscosity)
                                     .range(0f32..=1f32)
                                     .speed(0.001),
                             );
@@ -673,6 +677,8 @@ impl eframe::App for App {
                 .show(ui, |ui| {
                     let dt: f32 = ui.input(|i| i.stable_dt);
                     self.game_state
+                        .lock()
+                        .unwrap()
                         .update(ui.available_width() / ui.available_height(), dt);
 
                     log::info!(
@@ -688,8 +694,7 @@ impl eframe::App for App {
 }
 
 struct CustomCallback {
-    // particle_data: Vec<Particle>,
-    game_state: GameState,
+    game_state: Arc<Mutex<GameState>>,
 }
 
 impl egui_wgpu::CallbackTrait for CustomCallback {
@@ -705,7 +710,7 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         resources.prepare(
             device,
             queue,
-            &self.game_state,
+            self.game_state.clone(),
             screen_descriptor.size_in_pixels,
         );
         Vec::new()
@@ -718,7 +723,10 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         resources: &egui_wgpu::CallbackResources,
     ) {
         let resources: &RenderResources = resources.get().unwrap();
-        resources.paint(render_pass, self.game_state.particle_data.len());
+        resources.paint(
+            render_pass,
+            self.game_state.lock().unwrap().particle_data.len(),
+        );
     }
 }
 
@@ -747,7 +755,13 @@ struct RenderResources {
 }
 
 impl RenderResources {
-    fn prepare(&self, _device: &Device, queue: &Queue, game_state: &GameState, size: [u32; 2]) {
+    fn prepare(
+        &self,
+        _device: &Device,
+        queue: &Queue,
+        game_state_ref: Arc<Mutex<GameState>>,
+        size: [u32; 2],
+    ) {
         let aspect_ratio = size[0] as f32 / size[1] as f32;
 
         let transform =
@@ -760,6 +774,8 @@ impl RenderResources {
         };
 
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&ubo));
+
+        let game_state = game_state_ref.lock().unwrap();
 
         queue.write_buffer(
             &self.particle_buffer,
