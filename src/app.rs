@@ -338,9 +338,43 @@ impl App {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
+        let compute_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Compute Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let compute_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Compute Pipeline Layout"),
+                bind_group_layouts: &[&compute_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Compute Pipeline"),
-            layout: None,
+            layout: Some(&compute_pipeline_layout),
             module: &compute_shader,
             entry_point: None,
             compilation_options: Default::default(),
@@ -349,7 +383,7 @@ impl App {
 
         let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
-            layout: &compute_pipeline.get_bind_group_layout(0),
+            layout: &compute_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -713,7 +747,6 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
             ..Default::default()
         });
         cpass.set_pipeline(&resources.compute_pipeline);
-        cpass.set_bind_group(0, &resources.compute_bind_group, &[]);
 
         let num_dispatches = self
             .game_state
@@ -721,8 +754,11 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
             .unwrap()
             .particle_data
             .len()
-            .div_ceil(64) as u32;
-        cpass.dispatch_workgroups(num_dispatches, 1, 1);
+            .div_ceil(16) as u32;
+
+        cpass.set_bind_group(0, &resources.compute_bind_group, &[]);
+
+        cpass.dispatch_workgroups(num_dispatches, num_dispatches, 1);
 
         resources.prepare(
             device,
