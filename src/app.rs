@@ -45,6 +45,7 @@ pub struct Args {
 
 pub struct App {
     game_state: Arc<Mutex<GameState>>,
+    dt: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -429,6 +430,7 @@ impl App {
 
         Self {
             game_state: Arc::from(Mutex::from(game_state)),
+            dt: 0f32,
         }
 
         // self.config = Some(wgpu::SurfaceConfiguration {
@@ -680,6 +682,8 @@ impl eframe::App for App {
                     //     .unwrap()
                     //     .update(ui.available_width() / ui.available_height(), dt);
 
+                    self.dt = dt;
+
                     log::info!("FPS: {:?}", 1f32 / dt);
                     self.draw_app(ui);
                     ctx.request_repaint();
@@ -690,6 +694,7 @@ impl eframe::App for App {
 
 struct CustomCallback {
     game_state: Arc<Mutex<GameState>>,
+    dt: f32,
 }
 
 impl egui_wgpu::CallbackTrait for CustomCallback {
@@ -724,6 +729,7 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
             queue,
             self.game_state.clone(),
             screen_descriptor.size_in_pixels,
+            self.dt,
         );
         Vec::new()
     }
@@ -750,6 +756,7 @@ impl App {
             rect,
             CustomCallback {
                 game_state: self.game_state.clone(),
+                dt: self.dt,
             },
         ));
     }
@@ -774,6 +781,7 @@ impl RenderResources {
         queue: &Queue,
         game_state_ref: Arc<Mutex<GameState>>,
         size: [u32; 2],
+        dt: f32,
     ) {
         let aspect_ratio = size[0] as f32 / size[1] as f32;
 
@@ -782,7 +790,7 @@ impl RenderResources {
 
         let ubo = Ubo {
             transform: transform.to_cols_array(),
-            dt: 0f32, //TODO - set this
+            dt,
             ..Default::default()
         };
 

@@ -29,8 +29,11 @@ serde = { version = "1.0.228", features = ["derive"] }
 clap = { version = "4.5", features = ["derive"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wgpu = { version = "27.0", default-features = false, features = ["vulkan"] }
-rayon = "1.10"
+wgpu = { version = "27.0", default-features = false, features = [
+    "vulkan",
+    "metal",
+] }
+rayon = "1.11"
 env_logger = "0.11"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
