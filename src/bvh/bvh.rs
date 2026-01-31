@@ -1,12 +1,19 @@
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
 use glam::{Vec2, Vec3};
 use itertools::{partition, Itertools};
 use std::f32::{consts::PI, INFINITY, NEG_INFINITY};
 
 use super::super::app::Particle;
+use std::f32::EPSILON;
 
 static MAX_SHAPES_IN_NODE: usize = 4;
 
-pub struct Bvh(pub Vec<NodeInner>);
+pub struct Bvh<'a> {
+    nodes: Vec<NodeInner>,
+    particles: &'a [Particle],
+}
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
@@ -16,14 +23,16 @@ enum SplitMethod {
     Sah,
 }
 
+#[repr(align(64))]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct NodeInner {
-    pub centre: Vec2,
-    pub radius: f32,
-    pub skip_ptr_or_prim_idx1: u32,
-    pub prim_idx2: u32,
+    centre: Vec2,
+    radius: f32,
+    skip_ptr_or_prim_idx1: u32,
+    prim_idx2: u32,
 }
 
+#[repr(align(16))]
 #[derive(Debug, Default, Copy, Clone)]
 struct AABB {
     first: Vec2,
@@ -37,9 +46,10 @@ fn point_in_circle(centre: Vec2, radius: f32, point: Vec2) -> bool {
     // return square_dist <= radius ** 2
 }
 
+#[repr(align(16))]
 #[derive(Debug, Default, Copy, Clone)]
 struct MortonPrimitive {
-    primitive_index: usize,
+    primitive_index: u32,
     morton_code: u32,
 }
 
@@ -60,8 +70,8 @@ fn radix_sort(inp: &mut Vec<MortonPrimitive>) -> Vec<MortonPrimitive> {
         let mut bucket_count = [0; N_BUCKETS];
 
         inp.iter().for_each(|morton_primitive| {
-            let bucket = ((morton_primitive.morton_code >> low_bit) & BIT_MASK) as usize;
-            bucket_count[bucket] += 1;
+            let bucket = ((morton_primitive.morton_code >> low_bit) & BIT_MASK) as u32;
+            bucket_count[bucket as usize] += 1;
         });
 
         let mut out_index = [0; N_BUCKETS];
@@ -79,6 +89,7 @@ fn radix_sort(inp: &mut Vec<MortonPrimitive>) -> Vec<MortonPrimitive> {
     out
 }
 
+#[inline]
 fn left_shift_3(inp: u32) -> u32 {
     let mut x = inp;
 
@@ -90,6 +101,25 @@ fn left_shift_3(inp: u32) -> u32 {
     x = (x | (x << 4)) & 0b00000011000011000011000011000011;
     x = (x | (x << 2)) & 0b00001001001001001001001001001001;
     x
+}
+
+#[inline]
+fn left_shift_2(mut x: u32) -> u32 {
+    // Clamp range if you only want 16 bits (like 3D version clamps to 10 bits)
+    if x == (1 << 16) {
+        x -= 1;
+    }
+
+    // progressively spread bits apart by inserting 1 zero between them
+    x = (x | (x << 8)) & 0b00000000111111110000000011111111;
+    x = (x | (x << 4)) & 0b00001111000011110000111100001111;
+    x = (x | (x << 2)) & 0b00110011001100110011001100110011;
+    x = (x | (x << 1)) & 0b01010101010101010101010101010101;
+    x
+}
+
+fn encode_morton_2(inp: Vec2) -> u32 {
+    (left_shift_2(inp.y as u32) << 1) | left_shift_2(inp.x as u32)
 }
 
 fn encode_morton_3(inp: Vec3) -> u32 {
@@ -154,19 +184,57 @@ impl NodeInner {
     }
 }
 
-impl Bvh {
-    pub fn empty() -> Self {
-        Bvh(vec![])
+impl<'a> Bvh<'a> {
+    pub fn empty(particles: &'a [Particle]) -> Self {
+        Bvh {
+            nodes: vec![],
+            particles,
+        }
     }
 
-    pub fn new(particles: &mut [Particle], radius: f32, linear: bool) -> Self {
+    pub fn interaction(
+        &self,
+        group1: &mut [Particle],
+        g: f32,
+        radius: f32,
+        viscosity: f32,
+        aspect_ratio: f32,
+        dt: f32,
+    ) {
+        #[cfg(target_arch = "wasm32")]
+        let g_iter = group1.iter_mut();
+        #[cfg(not(target_arch = "wasm32"))]
+        let g_iter = group1.par_iter_mut();
+
+        g_iter.for_each(|p1| {
+            let f = self.intersect(p1, radius, g / 100f32, self.particles);
+
+            p1.vel += f * dt;
+            p1.vel *= 1f32 - (viscosity * dt);
+
+            // p1.vel = p1.vel.clamp_length_max(MAX_VELOCITY);
+
+            if (p1.pos.x >= aspect_ratio) || (p1.pos.x <= -aspect_ratio) {
+                p1.vel.x *= -1f32;
+                p1.pos.x = (aspect_ratio - EPSILON) * p1.pos.x.signum();
+            }
+            if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
+                p1.vel.y *= -1f32;
+                p1.pos.y = 1f32 * p1.pos.y.signum();
+            }
+
+            p1.pos += p1.vel * dt;
+        })
+    }
+
+    pub fn new(particles: &'a mut [Particle], radius: f32, linear: bool) -> Self {
         let mut object_inner_nodes: Vec<NodeInner> =
             Vec::with_capacity(particles.len().next_power_of_two());
 
         if linear {
             Bvh::build_linear(&mut object_inner_nodes, particles, radius);
         } else {
-            let split_method = SplitMethod::Sah;
+            let split_method = SplitMethod::EqualCounts;
 
             Bvh::recursive_build(
                 &mut object_inner_nodes,
@@ -179,14 +247,18 @@ impl Bvh {
         }
 
         if object_inner_nodes.is_empty() {
-            return Bvh::empty();
+            return Bvh::empty(particles);
         }
-        Bvh(object_inner_nodes)
+
+        Bvh {
+            nodes: object_inner_nodes,
+            particles,
+        }
     }
 
-    fn build_linear(
+    pub fn build_linear(
         bounding_circles: &mut Vec<NodeInner>,
-        particles: &mut [Particle],
+        particles: &[Particle],
         radius: f32,
     ) -> u32 {
         let bounds = particles.iter().fold(AABB::empty(), |acc, new| {
@@ -201,11 +273,11 @@ impl Bvh {
                 let centroid_offset = bounds.offset(&particles[i].pos);
                 let offset = centroid_offset * MORTON_SCALE;
                 MortonPrimitive {
-                    primitive_index: i,
-                    morton_code: encode_morton_3(Vec3::new(offset.x, offset.y, 0f32)),
+                    primitive_index: i as u32,
+                    morton_code: encode_morton_3(Vec3::new(offset.x, offset.y, 0.0)),
                 }
             })
-            .collect_vec();
+            .collect();
 
         morton_primitives = radix_sort(&mut morton_primitives);
 
@@ -216,14 +288,12 @@ impl Bvh {
         // let particles: Vec<Particle> = particles.iter().map(|p| p.clone()).collect();
         let ordered_particles = morton_primitives
             .iter()
-            .map(|mp| particles[mp.primitive_index])
+            .map(|mp| particles[mp.primitive_index as usize])
             .collect_vec();
-
-        particles.copy_from_slice(&ordered_particles);
 
         Bvh::emit_lbvh(
             morton_primitives.as_mut_slice(),
-            particles,
+            ordered_particles.as_slice(),
             bounding_circles,
             radius,
             0,
@@ -493,22 +563,16 @@ impl Bvh {
         bounding_circles.len() as u32
     }
 
-    pub fn intersect(
-        &self,
-        particle: &Particle,
-        radius: f32,
-        g: f32,
-        particles: &[Particle],
-    ) -> Vec2 {
+    fn intersect(&self, particle: &Particle, radius: f32, g: f32, particles: &[Particle]) -> Vec2 {
         let mut ret = Vec2::new(0f32, 0f32);
 
         let mut idx = 0;
         loop {
-            if idx >= self.0.len() {
+            if idx >= self.nodes.len() {
                 break;
             };
 
-            let current_node = &self.0[idx];
+            let current_node = &self.nodes[idx];
 
             let leaf_node: bool = current_node.prim_idx2 > 0u32;
 
@@ -603,7 +667,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, val)| MortonPrimitive {
-                    primitive_index: i,
+                    primitive_index: i as u32,
                     morton_code: *val,
                 })
                 .collect();

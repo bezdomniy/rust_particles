@@ -1,16 +1,16 @@
+use clap::Parser;
 use egui::Color32;
 use glam::{Mat4, UVec4, Vec2};
 use rand::{distr::Uniform, rng, Rng};
-use std::{borrow::Cow, f32::EPSILON};
+use std::{
+    borrow::Cow,
+    sync::{Arc, Mutex},
+};
+use wgpu::ComputePipeline;
 
-#[cfg(not(target_arch = "wasm32"))]
-use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::fs;
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{Duration, Instant};
-
-#[cfg(target_arch = "wasm32")]
-use instant::{Duration, Instant};
 // #[cfg(target_arch = "wasm32")]
 // pub use wasm_bindgen_rayon::init_thread_pool;
 
@@ -25,8 +25,6 @@ use eframe::{
 
 use crate::bvh::Bvh;
 
-const FRAMERATE: u32 = 30;
-const BOUNDS_TOGGLE: bool = true;
 const PARTICLE_SIZE: f32 = 2f32;
 // const PARTICLES_PER_GROUP: u32 = 64;
 // const MAX_VELOCITY: f32 = 1f32;
@@ -37,20 +35,89 @@ const USE_LINEAR_BVH: bool = false;
 const MIN_FORCE: f32 = -1f32;
 const MAX_FORCE: f32 = 1f32;
 
+/// A wgpu ray tracer
+#[derive(Parser, Debug, Default)]
+#[clap(about, author)]
+pub struct Args {
+    #[clap(short, long)]
+    reload_params: bool,
+    #[clap(short, long)]
+    use_gpu: bool,
+}
+
 pub struct App {
-    game_state: GameState,
-    last_update_inst: Instant,
-    _target_frame_time: Duration,
+    game_state: Arc<Mutex<GameState>>,
+    dt: f32,
+    use_gpu: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct InitialParams {
+    power: [f32; 16],
+    radius: [f32; 16],
+    num_particles: [u32; 4],
+    viscosity: f32,
+    use_gpu: bool,
 }
 
 #[derive(Clone)]
 struct GameState {
     particle_data: Vec<Particle>,
+    particle_cls: Vec<u32>,
     particle_offsets: [i32; 4],
     pub power_slider: Mat4,
-    pub r_slider: Mat4,
+    pub radius_slider: Mat4,
     pub num_particles: UVec4,
     pub viscosity: f32,
+}
+
+#[repr(C)]
+#[repr(align(16))]
+#[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Particle {
+    pub pos: Vec2,
+    pub vel: Vec2,
+}
+
+#[repr(C)]
+#[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct Ubo {
+    transform: [f32; 16],
+    dt: f32,
+    _padding: [f32; 3],
+}
+
+impl Default for InitialParams {
+    fn default() -> Self {
+        #[cfg(target_arch = "wasm32")]
+        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let num_particles = UVec4::new(10000, 10000, 10000, 10000);
+
+        let mut rng = rng();
+
+        let power_vals: [f32; 16] = (0..16)
+            .map(|_| rng.sample(Uniform::new(MIN_FORCE, MAX_FORCE).unwrap()))
+            // .map(|_| 0f32)
+            .collect::<Vec<f32>>()
+            .try_into()
+            .unwrap();
+
+        let r_vals: [f32; 16] = (0..16)
+            .map(|_| rng.sample(Uniform::new(0.01f32, 0.3f32).unwrap()))
+            .collect::<Vec<f32>>()
+            .try_into()
+            .unwrap();
+
+        Self {
+            power: power_vals,
+            radius: r_vals,
+            viscosity: INITIAL_VISCOSITY,
+            num_particles: num_particles.into(),
+            use_gpu: false,
+        }
+    }
 }
 
 impl GameState {
@@ -77,41 +144,23 @@ impl GameState {
 
             for _ in start..end {
                 let random_pos = match i {
-                    // 0 => Vec2::new(
-                    //     rng().random_range(-1f32..=0f32),
-                    //     rng().random_range(0f32..=1f32),
-                    // ),
-                    // 1 => Vec2::new(
-                    //     rng().random_range(0f32..=1f32),
-                    //     rng().random_range(0f32..=1f32),
-                    // ),
-                    // 2 => Vec2::new(
-                    //     rng().random_range(0f32..=1f32),
-                    //     rng().random_range(-1f32..=0f32),
-                    // ),
-                    // 3 => Vec2::new(
-                    //     rng().random_range(-1f32..=0f32),
-                    //     rng().random_range(-1f32..=0f32),
-                    // ),
                     _ => Vec2::new(
                         rng().random_range(-spread * aspect_ratio..=spread * aspect_ratio),
                         rng().random_range(-spread..=spread),
                     ),
                 };
+                // let random_vel = match i {
+                //     _ => Vec2::new(
+                //         rng().random_range(-10.1..=10.1),
+                //         rng().random_range(-10.1..=10.1),
+                //     ),
+                // };
                 let particle = Particle {
-                    // pos: Vec2::new(
-                    //     rng().random_range(-1f32..=1f32),
-                    //     rng().random_range(-1f32..=1f32),
-                    // ),
                     pos: random_pos,
-                    // vel: Vec2::new(
-                    //     rng().random_range(-0.01f32..=0.01f32),
-                    //     rng().random_range(-0.01f32..=0.01f32),
-                    // ),
                     vel: Vec2::new(0f32, 0f32),
-                    cls: i as u32,
                 };
                 self.particle_data.push(particle);
+                self.particle_cls.push(i as u32);
             }
         }
     }
@@ -126,35 +175,40 @@ impl GameState {
                 .into_iter()
                 .skip(i + 1)
                 .find(|&item| item > 0)
-                .unwrap_or(self.particle_data.len() as i32) as usize;
+                .unwrap_or(self.particle_data.len() as i32);
 
             for (j, group2_start) in self.particle_offsets.into_iter().enumerate() {
                 if group2_start < 0 {
                     continue;
                 }
 
-                let group2_end =
-                    self.particle_offsets
-                        .into_iter()
-                        .skip(j + 1)
-                        .find(|&item| item > 0)
-                        .unwrap_or(self.particle_data.len() as i32) as usize;
+                let group2_end = self
+                    .particle_offsets
+                    .into_iter()
+                    .skip(j + 1)
+                    .find(|&item| item > 0)
+                    .unwrap_or(self.particle_data.len() as i32);
 
-                let bvh = Bvh::new(
-                    &mut self.particle_data[group2_start as usize..group2_end],
-                    self.r_slider.col(i)[j],
-                    USE_LINEAR_BVH,
-                );
+                let ptr = self.particle_data.as_mut_ptr();
+                let group1 = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        ptr.add(group1_start as usize),
+                        (group1_end - group1_start) as usize,
+                    )
+                };
+                let group2 = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        ptr.add(group2_start as usize),
+                        (group2_end - group2_start) as usize,
+                    )
+                };
 
-                interaction(
-                    &mut self.particle_data,
-                    &bvh,
-                    group1_start as usize,
-                    group1_end,
-                    group2_start as usize,
-                    group2_end,
+                let bvh = Bvh::new(group2, self.radius_slider.col(i)[j], USE_LINEAR_BVH);
+
+                bvh.interaction(
+                    group1,
                     self.power_slider.col(i)[j],
-                    self.r_slider.col(i)[j],
+                    self.radius_slider.col(i)[j],
                     self.viscosity,
                     aspect_ratio,
                     dt,
@@ -164,177 +218,88 @@ impl GameState {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Default, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Particle {
-    pub pos: Vec2,
-    vel: Vec2,
-    cls: u32,
-}
-
-// Interaction between 2 particle groups
-fn interaction(
-    particles: &mut Vec<Particle>,
-    bvh: &Bvh,
-    group1_start: usize,
-    group1_end: usize,
-    group2_start: usize,
-    group2_end: usize,
-    g: f32,
-    radius: f32,
-    viscosity: f32,
-    aspect_ratio: f32,
-    dt: f32,
-) {
-    let group2 = &particles[group2_start as usize..group2_end].to_vec();
-    let group1 = &mut particles[group1_start as usize..group1_end];
-
-    #[cfg(target_arch = "wasm32")]
-    let g_iter = group1.iter_mut();
-    #[cfg(not(target_arch = "wasm32"))]
-    let g_iter = group1.par_iter_mut();
-
-    g_iter.for_each(|p1| {
-        let f = bvh.intersect(p1, radius, g/100f32, group2);
-
-        p1.vel += f * dt;
-        p1.vel *= 1f32 - (viscosity * dt);
-
-        // p1.vel = p1.vel.clamp_length_max(MAX_VELOCITY);
-
-        if BOUNDS_TOGGLE {
-            if (p1.pos.x >= aspect_ratio) || (p1.pos.x <= -aspect_ratio) {
-                p1.vel.x *= -1f32;
-                p1.pos.x = (aspect_ratio - EPSILON) * p1.pos.x.signum();
-            }
-            if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
-                p1.vel.y *= -1f32;
-                p1.pos.y = 1f32 * p1.pos.y.signum();
-            }
-        }
-
-        p1.pos += p1.vel * dt;
-    })
-}
-
 impl App {
     pub fn new<'a>(cc: &'a eframe::CreationContext<'a>) -> Self {
+        let mut initial_params = InitialParams::default();
+        if !cfg!(target_arch = "wasm32") {
+            let args = Args::parse();
+
+            if args.reload_params {
+                let initial_params_json =
+                    fs::read_to_string("last_run.json").expect("Failed to read params from file");
+                initial_params = serde_json::from_str(&initial_params_json)
+                    .expect("Failed to deserialize initial params");
+                log::info!("Reloaded params: {:?}", initial_params);
+            } else {
+                let initial_params_json = serde_json::to_string_pretty(&initial_params)
+                    .expect("Failed to serialize initial params");
+
+                fs::write("last_run.json", initial_params_json)
+                    .expect("Failed to write params to file");
+                log::info!("Saved params: {:?}", initial_params);
+            }
+            initial_params.use_gpu = args.use_gpu;
+        }
+
         let wgpu_render_state = cc.wgpu_render_state.as_ref().unwrap();
         let device = &wgpu_render_state.device;
 
-        let mut rng = rand::rng();
-
-        // let power_vals: [f32; 16] = (0..16)
-        //     .map(|_| rng.sample(Uniform::new(-0.5f32, 0.5f32)))
-        //     .collect::<Vec<f32>>()
-        //     .try_into()
-        //     .unwrap();
-
-        let power_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(MIN_FORCE, MAX_FORCE).unwrap()))
-            // .map(|_| 0f32)
-            .collect::<Vec<f32>>()
-            .try_into()
-            .unwrap();
-
-        let r_vals: [f32; 16] = (0..16)
-            .map(|_| rng.sample(Uniform::new(0.01f32, 0.3f32).unwrap()))
-            .collect::<Vec<f32>>()
-            .try_into()
-            .unwrap();
-
-        #[cfg(target_arch = "wasm32")]
-        let num_particles = UVec4::new(3000, 3000, 3000, 3000);
-
-        #[cfg(not(target_arch = "wasm32"))]
-        // let num_particles = UVec4::new(5000, 5000, 5000, 5000);
-        // let num_particles = UVec4::new(50, 50, 50, 50);
-        let num_particles = UVec4::new(10000, 10000, 10000, 10000);
+        let total_particles: u32 = initial_params.num_particles.iter().sum();
 
         let mut game_state = GameState {
-            particle_data: Vec::with_capacity(
-                (num_particles.x + num_particles.y + num_particles.z + num_particles.w) as usize,
-            ),
+            particle_data: Vec::with_capacity(total_particles as usize),
+            particle_cls: Vec::with_capacity(total_particles as usize),
             particle_offsets: [
-                if num_particles.x > 0 { 0 } else { -1 },
-                if num_particles.y > 0 {
-                    num_particles.x as i32
+                if initial_params.num_particles[0] > 0 {
+                    0
                 } else {
                     -1
                 },
-                if num_particles.z > 0 {
-                    (num_particles.x + num_particles.y) as i32
+                if initial_params.num_particles[1] > 0 {
+                    initial_params.num_particles[0] as i32
                 } else {
                     -1
                 },
-                if num_particles.w > 0 {
-                    (num_particles.x + num_particles.y + num_particles.z) as i32
+                if initial_params.num_particles[2] > 0 {
+                    (initial_params.num_particles[0] + initial_params.num_particles[1]) as i32
+                } else {
+                    -1
+                },
+                if initial_params.num_particles[3] > 0 {
+                    (initial_params.num_particles[0]
+                        + initial_params.num_particles[1]
+                        + initial_params.num_particles[2]) as i32
                 } else {
                     -1
                 },
             ],
-            power_slider: Mat4::from_cols_array(&power_vals),
-            r_slider: Mat4::from_cols_array(&r_vals),
-            // power_slider: Mat4::from_cols(
-            //     Vec4::new(1f32, 1f32, -10f32, 10f32),
-            //     Vec4::new(-20f32, 10f32, 10f32, 1f32),
-            //     Vec4::new(10f32, 1f32, 10f32, 10f32),
-            //     Vec4::new(1f32, -10f32, 10f32, 10f32),
-            // ),
-
-            // r_slider: Mat4::from_cols(
-            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
-            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
-            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
-            //     Vec4::new(1f32, 1f32, 1f32, 1f32),
-            // ),
-            num_particles,
+            power_slider: Mat4::from_cols_array(&initial_params.power),
+            radius_slider: Mat4::from_cols_array(&initial_params.radius),
+            num_particles: initial_params.num_particles.into(),
             viscosity: INITIAL_VISCOSITY,
         };
 
         // Load the shaders from disk
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders/compute.wgsl"))),
+        });
+
+        let draw_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders/particles.wgsl"))),
         });
 
-        // Create pipeline layout
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: None,
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(64),
-                },
-                count: None,
-            }],
-        });
+        let ubo = Ubo {
+            transform: Mat4::IDENTITY.to_cols_array(),
+            dt: 0f32,
+            ..Default::default()
+        };
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
-        });
-
-        let transform = Mat4::IDENTITY;
-        let mx_ref: &[f32; 16] = transform.as_ref();
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
-            contents: bytemuck::cast_slice(mx_ref),
+            contents: bytemuck::bytes_of(&ubo),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        // Create bind group
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
-            label: None,
         });
 
         // let swapchain_format = self.surface.get_supported_formats(&adapter)[0];
@@ -369,25 +334,90 @@ impl App {
             label: Some("Particle Buffer"),
             contents: bytemuck::cast_slice(&game_state.particle_data),
             usage: wgpu::BufferUsages::VERTEX
-                // | wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST,
+                | wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST, //TODO: doesnt need to be COPY_DST - just copy the initial positions at setup
         });
 
-        // // calculates number of work groups from PARTICLES_PER_GROUP constant
-        // let work_group_count =
-        //     ((NUM_PARTICLES as f32) / (PARTICLES_PER_GROUP as f32)).ceil() as u32;
+        let particle_cls_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Particle Buffer"),
+            contents: bytemuck::cast_slice(&game_state.particle_cls),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let compute_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Compute Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let compute_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Compute Pipeline Layout"),
+                bind_group_layouts: &[&compute_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("Compute Pipeline"),
+            layout: Some(&compute_pipeline_layout),
+            module: &compute_shader,
+            entry_point: None,
+            compilation_options: Default::default(),
+            cache: Default::default(),
+        });
+
+        let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &compute_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: particle_buffer.as_entire_binding(),
+                },
+            ],
+        });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
-            layout: Some(&pipeline_layout),
+            layout: None,
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &draw_shader,
                 entry_point: Some("main_vs"),
                 buffers: &[
                     wgpu::VertexBufferLayout {
-                        array_stride: 5 * 4,
+                        array_stride: 4 * 4,
                         step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &wgpu::vertex_attr_array![0 => Float32x4, 1 => Uint32],
+                        attributes: &wgpu::vertex_attr_array![0 => Float32x4],
+                    },
+                    wgpu::VertexBufferLayout {
+                        array_stride: 1 * 4,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &wgpu::vertex_attr_array![1 => Uint32],
                     },
                     wgpu::VertexBufferLayout {
                         array_stride: 2 * 4,
@@ -398,7 +428,7 @@ impl App {
                 compilation_options: Default::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &draw_shader,
                 entry_point: Some("main_fs"),
                 targets: &[Some(swapchain_format.into())],
                 compilation_options: Default::default(),
@@ -410,6 +440,17 @@ impl App {
             cache: Default::default(),
         });
 
+        // Create bind group
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            // layout: &bind_group_layout,
+            layout: &render_pipeline.get_bind_group_layout(0),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+            label: None,
+        });
+
         wgpu_render_state
             .renderer
             .write()
@@ -418,16 +459,20 @@ impl App {
             .insert(RenderResources {
                 render_bind_group: bind_group,
                 render_pipeline,
+                compute_bind_group,
+                compute_pipeline,
                 index_buffer,
                 uniform_buffer,
                 particle_buffer,
+                particle_cls_buffer,
                 vertex_buffer,
+                use_gpu: initial_params.use_gpu,
             });
 
         Self {
-            game_state,
-            last_update_inst: Instant::now(),
-            _target_frame_time: Duration::from_secs_f64(1.0 / FRAMERATE as f64),
+            game_state: Arc::from(Mutex::from(game_state)),
+            dt: 0f32,
+            use_gpu: initial_params.use_gpu,
         }
 
         // self.config = Some(wgpu::SurfaceConfiguration {
@@ -458,6 +503,7 @@ impl eframe::App for App {
                 .default_open(false)
                 .show(ctx, |ui| {
                     ui.horizontal_top(|ui| {
+                        let mut game_state = self.game_state.lock().unwrap();
                         egui::Grid::new("power_slider").show(ui, |ui| {
                             ui.label("Power");
                             ui.label("Red");
@@ -468,22 +514,22 @@ impl eframe::App for App {
 
                             ui.label("Red");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.x)
+                                egui::DragValue::new(&mut game_state.power_slider.x_axis.x)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.y)
+                                egui::DragValue::new(&mut game_state.power_slider.x_axis.y)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.z)
+                                egui::DragValue::new(&mut game_state.power_slider.x_axis.z)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.x_axis.w)
+                                egui::DragValue::new(&mut game_state.power_slider.x_axis.w)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
@@ -491,22 +537,22 @@ impl eframe::App for App {
 
                             ui.label("Green");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.x)
+                                egui::DragValue::new(&mut game_state.power_slider.y_axis.x)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.y)
+                                egui::DragValue::new(&mut game_state.power_slider.y_axis.y)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.z)
+                                egui::DragValue::new(&mut game_state.power_slider.y_axis.z)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.y_axis.w)
+                                egui::DragValue::new(&mut game_state.power_slider.y_axis.w)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
@@ -514,22 +560,22 @@ impl eframe::App for App {
 
                             ui.label("Blue");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.x)
+                                egui::DragValue::new(&mut game_state.power_slider.z_axis.x)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.y)
+                                egui::DragValue::new(&mut game_state.power_slider.z_axis.y)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.z)
+                                egui::DragValue::new(&mut game_state.power_slider.z_axis.z)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.z_axis.w)
+                                egui::DragValue::new(&mut game_state.power_slider.z_axis.w)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
@@ -537,22 +583,22 @@ impl eframe::App for App {
 
                             ui.label("White");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.x)
+                                egui::DragValue::new(&mut game_state.power_slider.w_axis.x)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.y)
+                                egui::DragValue::new(&mut game_state.power_slider.w_axis.y)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.z)
+                                egui::DragValue::new(&mut game_state.power_slider.w_axis.z)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.power_slider.w_axis.w)
+                                egui::DragValue::new(&mut game_state.power_slider.w_axis.w)
                                     .range(MIN_FORCE..=MAX_FORCE)
                                     .speed(0.01),
                             );
@@ -567,22 +613,22 @@ impl eframe::App for App {
                             ui.end_row();
                             ui.label("Red");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.x_axis.x)
+                                egui::DragValue::new(&mut game_state.radius_slider.x_axis.x)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.x_axis.y)
+                                egui::DragValue::new(&mut game_state.radius_slider.x_axis.y)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.x_axis.z)
+                                egui::DragValue::new(&mut game_state.radius_slider.x_axis.z)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.x_axis.w)
+                                egui::DragValue::new(&mut game_state.radius_slider.x_axis.w)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
@@ -590,44 +636,44 @@ impl eframe::App for App {
 
                             ui.label("Green");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.y_axis.x)
+                                egui::DragValue::new(&mut game_state.radius_slider.y_axis.x)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.y_axis.y)
+                                egui::DragValue::new(&mut game_state.radius_slider.y_axis.y)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.y_axis.z)
+                                egui::DragValue::new(&mut game_state.radius_slider.y_axis.z)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.y_axis.w)
+                                egui::DragValue::new(&mut game_state.radius_slider.y_axis.w)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.end_row();
                             ui.label("Blue");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.z_axis.x)
+                                egui::DragValue::new(&mut game_state.radius_slider.z_axis.x)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.z_axis.y)
+                                egui::DragValue::new(&mut game_state.radius_slider.z_axis.y)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.z_axis.z)
+                                egui::DragValue::new(&mut game_state.radius_slider.z_axis.z)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.z_axis.w)
+                                egui::DragValue::new(&mut game_state.radius_slider.z_axis.w)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
@@ -635,22 +681,22 @@ impl eframe::App for App {
 
                             ui.label("White");
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.w_axis.x)
+                                egui::DragValue::new(&mut game_state.radius_slider.w_axis.x)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.w_axis.y)
+                                egui::DragValue::new(&mut game_state.radius_slider.w_axis.y)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.w_axis.z)
+                                egui::DragValue::new(&mut game_state.radius_slider.w_axis.z)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.r_slider.w_axis.w)
+                                egui::DragValue::new(&mut game_state.radius_slider.w_axis.w)
                                     .range(0f32..=1f32)
                                     .speed(0.01),
                             );
@@ -660,7 +706,7 @@ impl eframe::App for App {
                             ui.label("Viscosity");
                             ui.end_row();
                             ui.add(
-                                egui::DragValue::new(&mut self.game_state.viscosity)
+                                egui::DragValue::new(&mut game_state.viscosity)
                                     .range(0f32..=1f32)
                                     .speed(0.001),
                             );
@@ -673,14 +719,16 @@ impl eframe::App for App {
                 .fill(Color32::BLACK)
                 .show(ui, |ui| {
                     let dt: f32 = ui.input(|i| i.stable_dt);
-                    self.game_state
-                        .update(ui.available_width() / ui.available_height(), dt);
 
-                    log::info!(
-                        "FPS: {:?}",
-                        // 1000u128 / self.last_update_inst.elapsed().as_millis(),
-                        1f32 / dt
-                    );
+                    if !self.use_gpu {
+                        self.game_state
+                            .lock()
+                            .unwrap()
+                            .update(ui.available_width() / ui.available_height(), dt);
+                    }
+                    self.dt = dt;
+
+                    log::info!("FPS: {:?}", 1f32 / dt);
                     self.draw_app(ui);
                     ctx.request_repaint();
                 })
@@ -689,8 +737,9 @@ impl eframe::App for App {
 }
 
 struct CustomCallback {
-    // particle_data: Vec<Particle>,
-    game_state: GameState,
+    game_state: Arc<Mutex<GameState>>,
+    dt: f32,
+    use_gpu: bool,
 }
 
 impl egui_wgpu::CallbackTrait for CustomCallback {
@@ -699,15 +748,37 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         screen_descriptor: &ScreenDescriptor,
-        _egui_encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         let resources: &RenderResources = resources.get().unwrap();
+
+        if self.use_gpu {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Update particles"),
+                ..Default::default()
+            });
+            cpass.set_pipeline(&resources.compute_pipeline);
+
+            let num_dispatches = self
+                .game_state
+                .lock()
+                .unwrap()
+                .particle_data
+                .len()
+                .div_ceil(16) as u32;
+
+            cpass.set_bind_group(0, &resources.compute_bind_group, &[]);
+
+            cpass.dispatch_workgroups(num_dispatches, num_dispatches, 1);
+        }
+
         resources.prepare(
             device,
             queue,
-            &self.game_state,
+            self.game_state.clone(),
             screen_descriptor.size_in_pixels,
+            self.dt,
         );
         Vec::new()
     }
@@ -719,7 +790,10 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
         resources: &egui_wgpu::CallbackResources,
     ) {
         let resources: &RenderResources = resources.get().unwrap();
-        resources.paint(render_pass, self.game_state.particle_data.len());
+        resources.paint(
+            render_pass,
+            self.game_state.lock().unwrap().particle_data.len(),
+        );
     }
 }
 
@@ -731,39 +805,62 @@ impl App {
             rect,
             CustomCallback {
                 game_state: self.game_state.clone(),
+                dt: self.dt,
+                use_gpu: self.use_gpu,
             },
         ));
-        self.last_update_inst = Instant::now();
     }
 }
 
 struct RenderResources {
     render_bind_group: BindGroup,
     render_pipeline: RenderPipeline,
+    compute_bind_group: BindGroup,
+    compute_pipeline: ComputePipeline,
     uniform_buffer: Buffer,
     particle_buffer: Buffer,
+    particle_cls_buffer: Buffer,
     vertex_buffer: Buffer,
     index_buffer: Buffer,
+    use_gpu: bool,
 }
 
 impl RenderResources {
-    fn prepare(&self, _device: &Device, queue: &Queue, game_state: &GameState, size: [u32; 2]) {
+    fn prepare(
+        &self,
+        _device: &Device,
+        queue: &Queue,
+        game_state_ref: Arc<Mutex<GameState>>,
+        size: [u32; 2],
+        dt: f32,
+    ) {
         let aspect_ratio = size[0] as f32 / size[1] as f32;
 
         let transform =
             Mat4::orthographic_rh(-aspect_ratio, aspect_ratio, -1f32, 1f32, -1f32, 1f32);
 
-        queue.write_buffer(
-            &self.uniform_buffer,
-            0,
-            bytemuck::cast_slice(&transform.to_cols_array()),
-        );
+        let ubo = Ubo {
+            transform: transform.to_cols_array(),
+            dt,
+            ..Default::default()
+        };
 
-        queue.write_buffer(
-            &self.particle_buffer,
-            0,
-            bytemuck::cast_slice(game_state.particle_data.as_slice()),
-        );
+        queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&ubo));
+
+        if !self.use_gpu {
+            let game_state = game_state_ref.lock().unwrap();
+
+            queue.write_buffer(
+                &self.particle_buffer,
+                0,
+                bytemuck::cast_slice(game_state.particle_data.as_slice()),
+            );
+            queue.write_buffer(
+                &self.particle_cls_buffer,
+                0,
+                bytemuck::cast_slice(game_state.particle_cls.as_slice()),
+            );
+        }
     }
 
     fn paint(&self, render_pass: &mut RenderPass<'_>, num_particles: usize) {
@@ -771,7 +868,8 @@ impl RenderResources {
         render_pass.set_pipeline(&self.render_pipeline);
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
         render_pass.set_vertex_buffer(0, self.particle_buffer.slice(..));
-        render_pass.set_vertex_buffer(1, self.vertex_buffer.slice(..));
+        render_pass.set_vertex_buffer(1, self.particle_cls_buffer.slice(..));
+        render_pass.set_vertex_buffer(2, self.vertex_buffer.slice(..));
         render_pass.draw_indexed(0..6u32, 0, 0..num_particles as u32);
     }
 }

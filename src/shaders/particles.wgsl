@@ -3,9 +3,14 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
+struct Ubo {
+    transform: mat4x4<f32>,
+    dt: f32
+};
+
 @group(0)
 @binding(0)
-var<uniform> transform: mat4x4<f32>;
+var<uniform> ubo: Ubo;
 
 @vertex
 fn main_vs(
@@ -15,7 +20,7 @@ fn main_vs(
 ) -> VertexOutput {
     var result: VertexOutput;
     result.cls = particle_cls;
-    result.position = transform * vec4<f32>(position + particle_data.xy, 0.0, 1.0);
+    result.position = ubo.transform * vec4<f32>(position + particle_data.xy, 0.0, 1.0);
     return result;
 }
 
