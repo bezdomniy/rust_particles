@@ -19,7 +19,7 @@ eframe = { version = "0.33", default-features = false, features = [
     "wgpu",
     "wayland",
 ] }
-glam = { version = "0.30", default-features = false, features = ["bytemuck"] }
+glam = { version = "0.31", default-features = false, features = ["bytemuck"] }
 bytemuck = { version = "1.20", features = ["derive"] }
 rand = "0.9"
 log = "0.4"

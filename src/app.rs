@@ -41,11 +41,14 @@ const MAX_FORCE: f32 = 1f32;
 pub struct Args {
     #[clap(short, long)]
     reload_params: bool,
+    #[clap(short, long)]
+    use_gpu: bool,
 }
 
 pub struct App {
     game_state: Arc<Mutex<GameState>>,
     dt: f32,
+    use_gpu: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -54,6 +57,7 @@ struct InitialParams {
     radius: [f32; 16],
     num_particles: [u32; 4],
     viscosity: f32,
+    use_gpu: bool,
 }
 
 #[derive(Clone)]
@@ -111,6 +115,7 @@ impl Default for InitialParams {
             radius: r_vals,
             viscosity: INITIAL_VISCOSITY,
             num_particles: num_particles.into(),
+            use_gpu: false,
         }
     }
 }
@@ -233,6 +238,7 @@ impl App {
                     .expect("Failed to write params to file");
                 log::info!("Saved params: {:?}", initial_params);
             }
+            initial_params.use_gpu = args.use_gpu;
         }
 
         let wgpu_render_state = cc.wgpu_render_state.as_ref().unwrap();
@@ -460,11 +466,13 @@ impl App {
                 particle_buffer,
                 particle_cls_buffer,
                 vertex_buffer,
+                use_gpu: initial_params.use_gpu,
             });
 
         Self {
             game_state: Arc::from(Mutex::from(game_state)),
             dt: 0f32,
+            use_gpu: initial_params.use_gpu,
         }
 
         // self.config = Some(wgpu::SurfaceConfiguration {
@@ -711,11 +719,13 @@ impl eframe::App for App {
                 .fill(Color32::BLACK)
                 .show(ui, |ui| {
                     let dt: f32 = ui.input(|i| i.stable_dt);
-                    // self.game_state
-                    //     .lock()
-                    //     .unwrap()
-                    //     .update(ui.available_width() / ui.available_height(), dt);
 
+                    if !self.use_gpu {
+                        self.game_state
+                            .lock()
+                            .unwrap()
+                            .update(ui.available_width() / ui.available_height(), dt);
+                    }
                     self.dt = dt;
 
                     log::info!("FPS: {:?}", 1f32 / dt);
@@ -729,6 +739,7 @@ impl eframe::App for App {
 struct CustomCallback {
     game_state: Arc<Mutex<GameState>>,
     dt: f32,
+    use_gpu: bool,
 }
 
 impl egui_wgpu::CallbackTrait for CustomCallback {
@@ -742,23 +753,25 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
     ) -> Vec<wgpu::CommandBuffer> {
         let resources: &RenderResources = resources.get().unwrap();
 
-        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("Update particles"),
-            ..Default::default()
-        });
-        cpass.set_pipeline(&resources.compute_pipeline);
+        if self.use_gpu {
+            let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("Update particles"),
+                ..Default::default()
+            });
+            cpass.set_pipeline(&resources.compute_pipeline);
 
-        let num_dispatches = self
-            .game_state
-            .lock()
-            .unwrap()
-            .particle_data
-            .len()
-            .div_ceil(16) as u32;
+            let num_dispatches = self
+                .game_state
+                .lock()
+                .unwrap()
+                .particle_data
+                .len()
+                .div_ceil(16) as u32;
 
-        cpass.set_bind_group(0, &resources.compute_bind_group, &[]);
+            cpass.set_bind_group(0, &resources.compute_bind_group, &[]);
 
-        cpass.dispatch_workgroups(num_dispatches, num_dispatches, 1);
+            cpass.dispatch_workgroups(num_dispatches, num_dispatches, 1);
+        }
 
         resources.prepare(
             device,
@@ -793,6 +806,7 @@ impl App {
             CustomCallback {
                 game_state: self.game_state.clone(),
                 dt: self.dt,
+                use_gpu: self.use_gpu,
             },
         ));
     }
@@ -808,6 +822,7 @@ struct RenderResources {
     particle_cls_buffer: Buffer,
     vertex_buffer: Buffer,
     index_buffer: Buffer,
+    use_gpu: bool,
 }
 
 impl RenderResources {
@@ -832,18 +847,20 @@ impl RenderResources {
 
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&ubo));
 
-        // let game_state = game_state_ref.lock().unwrap();
+        if !self.use_gpu {
+            let game_state = game_state_ref.lock().unwrap();
 
-        // queue.write_buffer(
-        //     &self.particle_buffer,
-        //     0,
-        //     bytemuck::cast_slice(game_state.particle_data.as_slice()),
-        // );
-        // queue.write_buffer(
-        //     &self.particle_cls_buffer,
-        //     0,
-        //     bytemuck::cast_slice(game_state.particle_cls.as_slice()),
-        // );
+            queue.write_buffer(
+                &self.particle_buffer,
+                0,
+                bytemuck::cast_slice(game_state.particle_data.as_slice()),
+            );
+            queue.write_buffer(
+                &self.particle_cls_buffer,
+                0,
+                bytemuck::cast_slice(game_state.particle_cls.as_slice()),
+            );
+        }
     }
 
     fn paint(&self, render_pass: &mut RenderPass<'_>, num_particles: usize) {
