@@ -279,12 +279,6 @@ impl App {
             viscosity: INITIAL_VISCOSITY,
         };
 
-        // Load the shaders from disk
-        let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders/compute.wgsl"))),
-        });
-
         let draw_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shaders/particles.wgsl"))),
@@ -344,63 +338,77 @@ impl App {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        let compute_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Compute Bind Group Layout"),
+        let mut compute_pipeline = None;
+        let mut compute_bind_group = None;
+
+        if initial_params.use_gpu {
+            let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: None,
+                source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!(
+                    "shaders/compute.wgsl"
+                ))),
+            });
+
+            let compute_bind_group_layout =
+                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Compute Bind Group Layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::COMPUTE,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                    ],
+                });
+
+            let compute_pipeline_layout =
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Compute Pipeline Layout"),
+                    bind_group_layouts: &[&compute_bind_group_layout],
+                    push_constant_ranges: &[],
+                });
+
+            compute_pipeline.replace(device.create_compute_pipeline(
+                &wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline"),
+                    layout: Some(&compute_pipeline_layout),
+                    module: &compute_shader,
+                    entry_point: None,
+                    compilation_options: Default::default(),
+                    cache: Default::default(),
+                },
+            ));
+
+            compute_bind_group.replace(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &compute_bind_group_layout,
                 entries: &[
-                    wgpu::BindGroupLayoutEntry {
+                    wgpu::BindGroupEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                        resource: uniform_buffer.as_entire_binding(),
                     },
-                    wgpu::BindGroupLayoutEntry {
+                    wgpu::BindGroupEntry {
                         binding: 1,
-                        visibility: wgpu::ShaderStages::COMPUTE,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Storage { read_only: false },
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                        resource: particle_buffer.as_entire_binding(),
                     },
                 ],
-            });
-
-        let compute_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Compute Pipeline Layout"),
-                bind_group_layouts: &[&compute_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
-        let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: Some("Compute Pipeline"),
-            layout: Some(&compute_pipeline_layout),
-            module: &compute_shader,
-            entry_point: None,
-            compilation_options: Default::default(),
-            cache: Default::default(),
-        });
-
-        let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &compute_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: particle_buffer.as_entire_binding(),
-                },
-            ],
-        });
+            }));
+        }
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
@@ -466,7 +474,6 @@ impl App {
                 particle_buffer,
                 particle_cls_buffer,
                 vertex_buffer,
-                use_gpu: initial_params.use_gpu,
             });
 
         Self {
@@ -739,7 +746,6 @@ impl eframe::App for App {
 struct CustomCallback {
     game_state: Arc<Mutex<GameState>>,
     dt: f32,
-    use_gpu: bool,
 }
 
 impl egui_wgpu::CallbackTrait for CustomCallback {
@@ -753,12 +759,12 @@ impl egui_wgpu::CallbackTrait for CustomCallback {
     ) -> Vec<wgpu::CommandBuffer> {
         let resources: &RenderResources = resources.get().unwrap();
 
-        if self.use_gpu {
+        if resources.compute_pipeline.is_some() {
             let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("Update particles"),
                 ..Default::default()
             });
-            cpass.set_pipeline(&resources.compute_pipeline);
+            cpass.set_pipeline(&resources.compute_pipeline.as_ref().unwrap());
 
             let num_dispatches = self
                 .game_state
@@ -806,7 +812,6 @@ impl App {
             CustomCallback {
                 game_state: self.game_state.clone(),
                 dt: self.dt,
-                use_gpu: self.use_gpu,
             },
         ));
     }
@@ -815,14 +820,13 @@ impl App {
 struct RenderResources {
     render_bind_group: BindGroup,
     render_pipeline: RenderPipeline,
-    compute_bind_group: BindGroup,
-    compute_pipeline: ComputePipeline,
+    compute_bind_group: Option<BindGroup>,
+    compute_pipeline: Option<ComputePipeline>,
     uniform_buffer: Buffer,
     particle_buffer: Buffer,
     particle_cls_buffer: Buffer,
     vertex_buffer: Buffer,
     index_buffer: Buffer,
-    use_gpu: bool,
 }
 
 impl RenderResources {
@@ -847,7 +851,7 @@ impl RenderResources {
 
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&ubo));
 
-        if !self.use_gpu {
+        if self.compute_pipeline.is_none() {
             let game_state = game_state_ref.lock().unwrap();
 
             queue.write_buffer(
