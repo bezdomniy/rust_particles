@@ -165,55 +165,84 @@ impl GameState {
         }
     }
     fn update(&mut self, aspect_ratio: f32, dt: f32) {
-        for (i, group1_start) in self.particle_offsets.into_iter().enumerate() {
-            if group1_start < 0 {
-                continue;
-            }
-
-            let group1_end = self
-                .particle_offsets
-                .into_iter()
-                .skip(i + 1)
-                .find(|&item| item > 0)
-                .unwrap_or(self.particle_data.len() as i32);
-
-            for (j, group2_start) in self.particle_offsets.into_iter().enumerate() {
-                if group2_start < 0 {
-                    continue;
+        let particle_count = self.particle_data.len();
+        let group_ranges: Vec<Option<std::ops::Range<usize>>> = self
+            .particle_offsets
+            .into_iter()
+            .enumerate()
+            .map(|(index, start)| {
+                if start < 0 {
+                    return None;
                 }
-
-                let group2_end = self
+                let end = self
                     .particle_offsets
                     .into_iter()
-                    .skip(j + 1)
-                    .find(|&item| item > 0)
-                    .unwrap_or(self.particle_data.len() as i32);
+                    .skip(index + 1)
+                    .find(|&offset| offset > 0)
+                    .unwrap_or(particle_count as i32);
+                Some(start as usize..end as usize)
+            })
+            .collect();
 
-                let ptr = self.particle_data.as_mut_ptr();
-                let group1 = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        ptr.add(group1_start as usize),
-                        (group1_end - group1_start) as usize,
-                    )
+        // All forces are evaluated from one immutable frame snapshot. Each
+        // source group therefore needs only one BVH, independent of the query
+        // radius used by each target group.
+        let snapshot = self.particle_data.clone();
+        let mut source_groups: Vec<Option<Vec<Particle>>> = group_ranges
+            .iter()
+            .map(|range| range.as_ref().map(|range| snapshot[range.clone()].to_vec()))
+            .collect();
+        let source_bvhs: Vec<Option<Bvh<'_>>> = source_groups
+            .iter_mut()
+            .map(|particles| {
+                particles
+                    .as_mut()
+                    .map(|particles| Bvh::new(particles, USE_LINEAR_BVH))
+            })
+            .collect();
+        let mut forces = vec![Vec2::ZERO; particle_count];
+
+        for (target_index, target_range) in group_ranges.iter().enumerate() {
+            let Some(target_range) = target_range else {
+                continue;
+            };
+            let target_particles = &snapshot[target_range.clone()];
+            let target_forces = &mut forces[target_range.clone()];
+
+            for (source_index, source_bvh) in source_bvhs.iter().enumerate() {
+                let Some(source_bvh) = source_bvh else {
+                    continue;
                 };
-                let group2 = unsafe {
-                    std::slice::from_raw_parts_mut(
-                        ptr.add(group2_start as usize),
-                        (group2_end - group2_start) as usize,
-                    )
-                };
-
-                let bvh = Bvh::new(group2, self.radius_slider.col(i)[j], USE_LINEAR_BVH);
-
-                bvh.interaction(
-                    group1,
-                    self.power_slider.col(i)[j],
-                    self.radius_slider.col(i)[j],
-                    self.viscosity,
-                    aspect_ratio,
-                    dt,
+                source_bvh.accumulate_forces(
+                    target_particles,
+                    target_forces,
+                    self.power_slider.col(target_index)[source_index],
+                    self.radius_slider.col(target_index)[source_index],
                 );
             }
+        }
+
+        let damping = 1.0 - self.viscosity * dt;
+        for ((particle, previous), force) in self
+            .particle_data
+            .iter_mut()
+            .zip(snapshot.iter())
+            .zip(forces.iter())
+        {
+            *particle = *previous;
+            particle.vel += *force * dt;
+            particle.vel *= damping;
+
+            if particle.pos.x >= aspect_ratio || particle.pos.x <= -aspect_ratio {
+                particle.vel.x *= -1.0;
+                particle.pos.x = (aspect_ratio - f32::EPSILON) * particle.pos.x.signum();
+            }
+            if particle.pos.y >= 1.0 || particle.pos.y <= -1.0 {
+                particle.vel.y *= -1.0;
+                particle.pos.y = particle.pos.y.signum();
+            }
+
+            particle.pos += particle.vel * dt;
         }
     }
 }

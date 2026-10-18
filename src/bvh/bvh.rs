@@ -6,8 +6,6 @@ use itertools::{partition, Itertools};
 use std::f32::{consts::PI, INFINITY, NEG_INFINITY};
 
 use super::super::app::Particle;
-use std::f32::EPSILON;
-
 static MAX_SHAPES_IN_NODE: usize = 4;
 
 pub struct Bvh<'a> {
@@ -179,12 +177,27 @@ impl NodeInner {
         }
     }
 
+    fn from_centroid_bounds(bounds: &AABB) -> Self {
+        NodeInner::new(
+            (bounds.first + bounds.second) * 0.5,
+            bounds.diagonal().length() * 0.5,
+            0,
+            0,
+        )
+    }
+
     pub fn surface_area(&self) -> f32 {
         (self.radius * self.radius) * PI
     }
 }
 
 impl<'a> Bvh<'a> {
+    fn sah_bucket_index(centroid_bounds: &AABB, point: &Vec2, dimension: usize) -> usize {
+        const N_BUCKETS: usize = 12;
+        let normalized = centroid_bounds.offset(point)[dimension].clamp(0.0, 1.0);
+        ((normalized * N_BUCKETS as f32) as usize).min(N_BUCKETS - 1)
+    }
+
     pub fn empty(particles: &'a [Particle]) -> Self {
         Bvh {
             nodes: vec![],
@@ -192,54 +205,29 @@ impl<'a> Bvh<'a> {
         }
     }
 
-    pub fn interaction(
-        &self,
-        group1: &mut [Particle],
-        g: f32,
-        radius: f32,
-        viscosity: f32,
-        aspect_ratio: f32,
-        dt: f32,
-    ) {
+    pub fn accumulate_forces(&self, group1: &[Particle], forces: &mut [Vec2], g: f32, radius: f32) {
         #[cfg(target_arch = "wasm32")]
-        let g_iter = group1.iter_mut();
+        let g_iter = group1.iter().zip(forces.iter_mut());
         #[cfg(not(target_arch = "wasm32"))]
-        let g_iter = group1.par_iter_mut();
+        let g_iter = group1.par_iter().zip(forces.par_iter_mut());
 
-        g_iter.for_each(|p1| {
-            let f = self.intersect(p1, radius, g / 100f32, self.particles);
-
-            p1.vel += f * dt;
-            p1.vel *= 1f32 - (viscosity * dt);
-
-            // p1.vel = p1.vel.clamp_length_max(MAX_VELOCITY);
-
-            if (p1.pos.x >= aspect_ratio) || (p1.pos.x <= -aspect_ratio) {
-                p1.vel.x *= -1f32;
-                p1.pos.x = (aspect_ratio - EPSILON) * p1.pos.x.signum();
-            }
-            if (p1.pos.y >= 1f32) || (p1.pos.y <= -1f32) {
-                p1.vel.y *= -1f32;
-                p1.pos.y = 1f32 * p1.pos.y.signum();
-            }
-
-            p1.pos += p1.vel * dt;
-        })
+        g_iter.for_each(|(particle, force)| {
+            *force += self.intersect(particle, radius, g / 100f32, self.particles);
+        });
     }
 
-    pub fn new(particles: &'a mut [Particle], radius: f32, linear: bool) -> Self {
+    pub fn new(particles: &'a mut [Particle], linear: bool) -> Self {
         let mut object_inner_nodes: Vec<NodeInner> =
             Vec::with_capacity(particles.len().next_power_of_two());
 
         if linear {
-            Bvh::build_linear(&mut object_inner_nodes, particles, radius);
+            Bvh::build_linear(&mut object_inner_nodes, particles);
         } else {
             let split_method = SplitMethod::EqualCounts;
 
             Bvh::recursive_build(
                 &mut object_inner_nodes,
                 particles,
-                radius,
                 0,
                 particles.len(),
                 split_method,
@@ -256,11 +244,7 @@ impl<'a> Bvh<'a> {
         }
     }
 
-    pub fn build_linear(
-        bounding_circles: &mut Vec<NodeInner>,
-        particles: &[Particle],
-        radius: f32,
-    ) -> u32 {
+    pub fn build_linear(bounding_circles: &mut Vec<NodeInner>, particles: &mut [Particle]) -> u32 {
         let bounds = particles.iter().fold(AABB::empty(), |acc, new| {
             acc.add_point(&new.bounds_centroid())
         });
@@ -290,12 +274,12 @@ impl<'a> Bvh<'a> {
             .iter()
             .map(|mp| particles[mp.primitive_index as usize])
             .collect_vec();
+        particles.copy_from_slice(&ordered_particles);
 
         Bvh::emit_lbvh(
             morton_primitives.as_mut_slice(),
-            ordered_particles.as_slice(),
+            particles,
             bounding_circles,
-            radius,
             0,
             size,
             FIRST_BIT_INDEX,
@@ -308,20 +292,20 @@ impl<'a> Bvh<'a> {
         morton_primitives: &mut [MortonPrimitive],
         ordered_particles: &[Particle],
         bounding_circles: &mut Vec<NodeInner>,
-        radius: f32,
         start: usize,
         end: usize,
         bit_index: i32,
     ) -> u32 {
         // println!("{:?}", bit_index);
         let n_primitives = end - start;
-        let is_leaf: bool = bit_index == -1 || n_primitives <= 2;
+        let is_leaf: bool = bit_index == -1 || n_primitives <= MAX_SHAPES_IN_NODE;
 
-        let mut bounds = ordered_particles[start..end]
+        let centroid_bounds = ordered_particles[start..end]
             .iter()
-            .fold(NodeInner::empty(), |acc: NodeInner, new| {
-                acc.merge(&new.bounds(radius))
+            .fold(AABB::empty(), |acc, particle| {
+                acc.add_point(&particle.bounds_centroid())
             });
+        let mut bounds = NodeInner::from_centroid_bounds(&centroid_bounds);
 
         if is_leaf {
             // println!("leaf, {} {}", bit_index, n_primitives);
@@ -339,7 +323,6 @@ impl<'a> Bvh<'a> {
                     morton_primitives,
                     ordered_particles,
                     bounding_circles,
-                    radius,
                     start,
                     end,
                     bit_index - 1,
@@ -369,7 +352,6 @@ impl<'a> Bvh<'a> {
                 morton_primitives,
                 ordered_particles,
                 bounding_circles,
-                radius,
                 start,
                 split_offset,
                 bit_index - 1,
@@ -378,7 +360,6 @@ impl<'a> Bvh<'a> {
                 morton_primitives,
                 ordered_particles,
                 bounding_circles,
-                radius,
                 split_offset,
                 end,
                 bit_index - 1,
@@ -393,7 +374,6 @@ impl<'a> Bvh<'a> {
     fn recursive_build(
         bounding_circles: &mut Vec<NodeInner>,
         particles: &mut [Particle],
-        radius: f32,
         start: usize,
         end: usize,
         split_method: SplitMethod,
@@ -410,11 +390,7 @@ impl<'a> Bvh<'a> {
                 acc.add_point(&new.bounds_centroid())
             });
 
-        let mut bounds = particles[start..end]
-            .iter()
-            .fold(NodeInner::empty(), |acc, new| {
-                acc.merge(&new.bounds(radius))
-            });
+        let mut bounds = NodeInner::from_centroid_bounds(&centroid_bounds);
 
         // println!("b: {:?}", bounds);
 
@@ -427,7 +403,7 @@ impl<'a> Bvh<'a> {
 
         let is_leaf: bool = centroid_bounds.first[split_dimension]
             == centroid_bounds.second[split_dimension]
-            || n_primitives <= 2;
+            || n_primitives <= MAX_SHAPES_IN_NODE;
 
         if is_leaf {
             // println!("leaf");
@@ -459,8 +435,7 @@ impl<'a> Bvh<'a> {
                 mid = (start + end) / 2;
                 particles[start..end].select_nth_unstable_by(mid - start, |a, b| {
                     a.bounds_centroid()[split_dimension]
-                        .partial_cmp(&b.bounds_centroid()[split_dimension])
-                        .unwrap()
+                        .total_cmp(&b.bounds_centroid()[split_dimension])
                 });
             }
 
@@ -469,24 +444,21 @@ impl<'a> Bvh<'a> {
                     mid = (start + end) / 2;
                     particles[start..end].select_nth_unstable_by(mid - start, |a, b| {
                         a.bounds_centroid()[split_dimension]
-                            .partial_cmp(&b.bounds_centroid()[split_dimension])
-                            .unwrap()
+                            .total_cmp(&b.bounds_centroid()[split_dimension])
                     });
                 } else {
                     let n_buckets: usize = 12;
                     let mut buckets = vec![NodeInner::empty(); n_buckets];
+                    let mut bucket_counts = vec![0u32; n_buckets];
 
-                    for triangle in particles.iter().take(end).skip(start) {
-                        let mut b: usize = n_buckets
-                            * centroid_bounds.offset(&triangle.bounds_centroid())[split_dimension]
-                                .round() as usize;
-
-                        if b == n_buckets {
-                            b = n_buckets - 1;
-                        };
-
-                        buckets[b].skip_ptr_or_prim_idx1 += 1; // Using this for the count variable
-                        buckets[b].merge(&triangle.bounds(radius));
+                    for particle in particles.iter().take(end).skip(start) {
+                        let b = Self::sah_bucket_index(
+                            &centroid_bounds,
+                            &particle.bounds_centroid(),
+                            split_dimension,
+                        );
+                        bucket_counts[b] += 1;
+                        buckets[b] = buckets[b].merge(&particle.bounds());
                     }
 
                     let mut cost = vec![0f32; n_buckets - 1];
@@ -497,20 +469,31 @@ impl<'a> Bvh<'a> {
                         let mut count0: u32 = 0;
                         let mut count1: u32 = 0;
 
-                        for node in buckets.iter().take(i + 1) {
-                            b0 = b1.merge(node);
-                            count0 += node.skip_ptr_or_prim_idx1;
+                        for (node, count) in buckets.iter().zip(bucket_counts.iter()).take(i + 1) {
+                            if *count > 0 {
+                                b0 = b0.merge(node);
+                                count0 += count;
+                            }
                         }
 
-                        for node in buckets.iter().take(n_buckets).skip(i + 1) {
-                            b1 = b1.merge(node);
-                            count1 += node.skip_ptr_or_prim_idx1;
+                        for (node, count) in buckets.iter().zip(bucket_counts.iter()).skip(i + 1) {
+                            if *count > 0 {
+                                b1 = b1.merge(node);
+                                count1 += count;
+                            }
                         }
 
-                        *c = 1f32
-                            + (count0 as f32 * b0.surface_area()
-                                + count1 as f32 * b1.surface_area())
-                                / bounds.surface_area();
+                        let cost0 = if count0 > 0 {
+                            count0 as f32 * b0.surface_area()
+                        } else {
+                            0.0
+                        };
+                        let cost1 = if count1 > 0 {
+                            count1 as f32 * b1.surface_area()
+                        } else {
+                            0.0
+                        };
+                        *c = 1f32 + (cost0 + cost1) / bounds.surface_area();
                     }
 
                     let mut min_cost = cost[0];
@@ -526,14 +509,21 @@ impl<'a> Bvh<'a> {
                     let leaf_cost = n_primitives as f32;
                     if n_primitives > MAX_SHAPES_IN_NODE || min_cost < leaf_cost {
                         mid = partition(particles[start..end].iter_mut(), |n| {
-                            let mut b: usize = n_buckets
-                                * centroid_bounds.offset(&n.bounds_centroid())[split_dimension]
-                                    .round() as usize;
-                            if b == n_buckets {
-                                b = n_buckets - 1;
-                            };
+                            let b = Self::sah_bucket_index(
+                                &centroid_bounds,
+                                &n.bounds_centroid(),
+                                split_dimension,
+                            );
                             b <= min_cost_split_bucket
                         }) + start;
+
+                        if mid == start || mid == end {
+                            mid = (start + end) / 2;
+                            particles[start..end].select_nth_unstable_by(mid - start, |a, b| {
+                                a.bounds_centroid()[split_dimension]
+                                    .total_cmp(&b.bounds_centroid()[split_dimension])
+                            });
+                        }
                     } else {
                         // println!("leaf");
                         bounds.skip_ptr_or_prim_idx1 = start as u32;
@@ -547,16 +537,9 @@ impl<'a> Bvh<'a> {
             let curr_idx = bounding_circles.len();
             bounding_circles.push(bounds);
 
-            Bvh::recursive_build(
-                bounding_circles,
-                particles,
-                radius,
-                start,
-                mid,
-                split_method,
-            );
+            Bvh::recursive_build(bounding_circles, particles, start, mid, split_method);
             let skip_ptr =
-                Bvh::recursive_build(bounding_circles, particles, radius, mid, end, split_method);
+                Bvh::recursive_build(bounding_circles, particles, mid, end, split_method);
 
             bounding_circles[curr_idx].skip_ptr_or_prim_idx1 = skip_ptr;
         }
@@ -576,7 +559,11 @@ impl<'a> Bvh<'a> {
 
             let leaf_node: bool = current_node.prim_idx2 > 0u32;
 
-            if point_in_circle(current_node.centre, current_node.radius, particle.pos) {
+            if point_in_circle(
+                current_node.centre,
+                current_node.radius + radius,
+                particle.pos,
+            ) {
                 if leaf_node {
                     for prim_idx in current_node.skip_ptr_or_prim_idx1..current_node.prim_idx2 {
                         let p2 = &particles[prim_idx as usize];
@@ -606,13 +593,13 @@ impl<'a> Bvh<'a> {
 }
 
 trait Bounded {
-    fn bounds(&self, radius: f32) -> NodeInner;
+    fn bounds(&self) -> NodeInner;
     fn bounds_centroid(&self) -> Vec2;
 }
 
 impl Bounded for Particle {
-    fn bounds(&self, radius: f32) -> NodeInner {
-        NodeInner::new(self.pos, radius, 0u32, 0u32)
+    fn bounds(&self) -> NodeInner {
+        NodeInner::new(self.pos, 0.0, 0u32, 0u32)
     }
 
     fn bounds_centroid(&self) -> Vec2 {
@@ -653,6 +640,20 @@ impl AABB {
 mod tests {
     use super::*;
 
+    fn particle_at(x: f32) -> Particle {
+        Particle {
+            pos: Vec2::new(x, 0.0),
+            vel: Vec2::ZERO,
+        }
+    }
+
+    fn build_sah(particles: &mut [Particle]) -> Vec<NodeInner> {
+        let mut nodes = Vec::with_capacity(particles.len().next_power_of_two());
+        let particle_count = particles.len();
+        Bvh::recursive_build(&mut nodes, particles, 0, particle_count, SplitMethod::Sah);
+        nodes
+    }
+
     #[test]
     fn test_radix_sort() {
         use rand::Rng;
@@ -679,6 +680,97 @@ mod tests {
 
             vals.sort();
             assert_eq!(out, vals);
+        }
+    }
+
+    #[test]
+    fn sah_root_split_is_not_pathologically_unbalanced() {
+        let mut particles: Vec<_> = (0..96).map(|index| particle_at(index as f32)).collect();
+        let nodes = build_sah(&mut particles);
+        let right_subtree_start = nodes[1].skip_ptr_or_prim_idx1 as usize;
+        let left_primitive_count: usize = nodes[1..right_subtree_start]
+            .iter()
+            .filter(|node| node.prim_idx2 > 0)
+            .map(|node| (node.prim_idx2 - node.skip_ptr_or_prim_idx1) as usize)
+            .sum();
+
+        assert!(
+            (24..=72).contains(&left_primitive_count),
+            "SAH root split placed {left_primitive_count}/96 particles on the left"
+        );
+    }
+
+    #[test]
+    fn sah_bucket_index_uses_the_full_bucket_range() {
+        let bounds = AABB::new(Vec2::ZERO, Vec2::new(12.0, 1.0));
+        assert_eq!(Bvh::sah_bucket_index(&bounds, &Vec2::new(0.0, 0.0), 0), 0);
+        assert_eq!(Bvh::sah_bucket_index(&bounds, &Vec2::new(6.0, 0.0), 0), 6);
+        assert_eq!(Bvh::sah_bucket_index(&bounds, &Vec2::new(12.0, 0.0), 0), 11);
+    }
+
+    #[test]
+    fn sah_leaf_ranges_cover_every_particle_once() {
+        let particle_count = 97usize;
+        let mut particles: Vec<_> = (0..particle_count)
+            .map(|index| particle_at((index * 17 % particle_count) as f32))
+            .collect();
+        let nodes = build_sah(&mut particles);
+        let mut coverage = vec![0u8; particle_count];
+
+        for node in nodes.iter().filter(|node| node.prim_idx2 > 0) {
+            for primitive_index in node.skip_ptr_or_prim_idx1..node.prim_idx2 {
+                coverage[primitive_index as usize] += 1;
+            }
+        }
+
+        assert!(coverage.iter().all(|count| *count == 1));
+    }
+
+    #[test]
+    fn bvh_force_matches_brute_force() {
+        let original_sources = vec![
+            Particle {
+                pos: Vec2::new(-0.8, -0.4),
+                vel: Vec2::ZERO,
+            },
+            Particle {
+                pos: Vec2::new(-0.35, 0.3),
+                vel: Vec2::ZERO,
+            },
+            Particle {
+                pos: Vec2::new(0.1, -0.2),
+                vel: Vec2::ZERO,
+            },
+            Particle {
+                pos: Vec2::new(0.25, 0.4),
+                vel: Vec2::ZERO,
+            },
+            Particle {
+                pos: Vec2::new(0.9, 0.1),
+                vel: Vec2::ZERO,
+            },
+        ];
+        let targets = vec![particle_at(-0.2), particle_at(0.5)];
+        let radius = 0.75;
+
+        for linear in [false, true] {
+            let mut sources = original_sources.clone();
+            let mut actual = vec![Vec2::ZERO; targets.len()];
+            let bvh = Bvh::new(&mut sources, linear);
+            bvh.accumulate_forces(&targets, &mut actual, 100.0, radius);
+
+            for (target_index, target) in targets.iter().enumerate() {
+                let expected = bvh.particles.iter().fold(Vec2::ZERO, |force, source| {
+                    let distance = target.pos.distance(source.pos);
+                    if distance < radius {
+                        let direction = (source.pos - target.pos).normalize_or_zero();
+                        force + direction * (1.0 - distance / radius)
+                    } else {
+                        force
+                    }
+                });
+                assert!((actual[target_index] - expected).length() < 1e-6);
+            }
         }
     }
 }
